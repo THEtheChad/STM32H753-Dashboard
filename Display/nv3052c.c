@@ -57,20 +57,37 @@ static void ltdc_clk_restore(void)
     HAL_GPIO_Init(LTDC_CLK_PORT, &g);
 }
 
-static void spi_write_9(uint16_t word)
+/* Clock out one 9-bit word (D/C bit + 8 data bits). CS must already be LOW. */
+static void spi_word_9(uint16_t word)
 {
-    HAL_GPIO_WritePin(NV3052C_CS_GPIO_Port, NV3052C_CS_Pin, GPIO_PIN_RESET);
     for (int i = 8; i >= 0; i--) {
         HAL_GPIO_WritePin(BB_SCK_PORT,  BB_SCK_PIN,  GPIO_PIN_RESET);
         HAL_GPIO_WritePin(BB_MOSI_PORT, BB_MOSI_PIN, ((word >> i) & 1) ? GPIO_PIN_SET : GPIO_PIN_RESET);
         HAL_GPIO_WritePin(BB_SCK_PORT,  BB_SCK_PIN,  GPIO_PIN_SET);
     }
+}
+
+/* One command and all its parameters inside a single CS frame.
+ * The previous driver raised CS after every 9-bit word; multi-parameter
+ * commands — critically the 0xFF page select, which per datasheet 5.x takes
+ * its three parameters (0x30, 0x52, page) as ONE command frame — may never
+ * have taken effect, leaving pages 1-3 of the init unapplied. */
+static void nv_write(uint8_t cmd, const uint8_t *params, size_t n)
+{
+    HAL_GPIO_WritePin(NV3052C_CS_GPIO_Port, NV3052C_CS_Pin, GPIO_PIN_RESET);
+    spi_word_9(cmd);
+    for (size_t i = 0; i < n; i++)
+        spi_word_9(0x100u | params[i]);
     HAL_GPIO_WritePin(NV3052C_CS_GPIO_Port, NV3052C_CS_Pin, GPIO_PIN_SET);
 }
 
-static inline void nv_cmd(uint8_t c)            { spi_write_9(c); }
-static inline void nv_dat(uint8_t d)            { spi_write_9(0x100u | d); }
-static inline void nv_reg(uint8_t r, uint8_t v) { nv_cmd(r); nv_dat(v); }
+static inline void nv_reg(uint8_t r, uint8_t v) { nv_write(r, &v, 1); }
+
+static void nv_page(uint8_t page)
+{
+    const uint8_t p[3] = {0x30, 0x52, page};
+    nv_write(0xFF, p, 3);
+}
 
 /* -------------------------------------------------------------------------
  * Init register table (page-switched layout)
@@ -80,7 +97,7 @@ typedef struct { uint8_t reg; uint8_t val; } nv_reg_t;
 static const nv_reg_t nv_init[] = {
     /* Page 1: Power, VCOM, analog */
     {0xFF,0x30},{0xFF,0x52},{0xFF,0x01},
-    {0xE3,0x00},{0x0A,0x11},{0x23,0x80},{0x24,0x32},{0x25,0x12},  /* 0x23=0x80 = SYNC+DE mode (manufacturer used 0xA0=DE-only; SYNC+DE is more tolerant of jumper-wire timing) */
+    {0xE3,0x00},{0x0A,0x11},{0x23,0xA0},{0x24,0x32},{0x25,0x12},  /* 0x23=0xA0 = manufacturer's value (DE-only). Earlier 0x80 experiment predates the CS-framing fix, when page-1 writes likely never applied. */
     {0x26,0x2E},{0x27,0x2E},{0x29,0x02},{0x2A,0xCF},{0x32,0x34},
     {0x38,0x9C},{0x39,0xA7},{0x3A,0x27},{0x3B,0x94},
     {0x42,0x6D},{0x43,0x83},{0x81,0x00},
@@ -129,22 +146,13 @@ static const nv_reg_t nv_init[] = {
      *   D1 = ss   (0 = source scan L→R, 1 = source scan R→L)
      *   D0 = gs   (0 = gate scan T→B,  1 = gate scan B→T)
      *
-     * NV3052CGRB has two physical source-driver banks (S1-S1080 and
-     * S1321-S2400) covering the 720-pixel-wide panel as left/right halves.
-     * The unresolved half-split bug shows up as one bank rendering correctly
-     * while the other shows garbled vertical-stripe ("barcode") output.
-     * The ss bit decides which bank gets the LATE pixels in each row, and
-     * the late-pixel bank is the one that ends up garbled:
-     *
-     *   0x0A (bgr=1, ss=1) — manufacturer's spec.
-     *                        Garbled side: LEFT.  Working side: RIGHT (washed colors).
-     *
-     *   0x00 (bgr=0, ss=0) — flipped scan direction.
-     *                        Garbled side: RIGHT (with a bright white line near col 360).
-     *                        Working side: LEFT.
-     *
-     * Change one byte below to switch which side is usable during testing. */
-    {0x36,0x00},  /* MADCTL — see above */
+     * Historical half-split evidence (pre CS-framing fix): the garbled half
+     * followed the ss bit (0x0A → left garbled, 0x00 → right garbled), i.e.
+     * whichever bank latches the LATE pixels of each line. Video analysis
+     * showed the garbled half never latches ANY data (stripes frozen across
+     * BCCR color changes) — consistent with the panel running on power-on
+     * defaults because the page 1-3 init never applied (see nv_write). */
+    {0x36,0x0A},  /* MADCTL — manufacturer's value */
 };
 
 /* -------------------------------------------------------------------------
@@ -199,9 +207,17 @@ void NV3052C_Init(void)
     HAL_GPIO_WritePin(NV3052C_RST_GPIO_Port, NV3052C_RST_Pin, GPIO_PIN_SET);
     HAL_Delay(150);
 
-    /* Send init sequence */
-    for (size_t i = 0; i < sizeof(nv_init) / sizeof(nv_reg_t); i++)
-        nv_reg(nv_init[i].reg, nv_init[i].val);
+    /* Send init sequence. The table keeps the manufacturer's layout where a
+     * page switch appears as three consecutive 0xFF entries (0x30, 0x52, page);
+     * those are collapsed into one 3-parameter command frame here. */
+    for (size_t i = 0; i < sizeof(nv_init) / sizeof(nv_reg_t); i++) {
+        if (nv_init[i].reg == 0xFF) {
+            nv_page(nv_init[i + 2].val);
+            i += 2;
+        } else {
+            nv_reg(nv_init[i].reg, nv_init[i].val);
+        }
+    }
 
     nv_reg(0x11, 0x00);   /* Sleep Out */
     HAL_Delay(200);
