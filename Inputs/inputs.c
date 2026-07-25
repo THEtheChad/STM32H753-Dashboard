@@ -25,7 +25,9 @@ InputData inputs = {0};
  *   mph        = freq_Hz × 3600 / pulses_per_mile
  *              = (VSS_TIM_CLK_HZ × 3600) / (avg_period × pulses_per_mile)
  * -------------------------------------------------------------------------*/
-#define VSS_TIM_CLK_HZ          64000000U
+/* TIM2 kernel clock, derived at init from the live RCC tree (2x APB1
+ * while the APB divider > 1) so clock-tree changes can't skew speed */
+static uint32_t vssTimClkHz;
 #define VSS_TIMEOUT_MS          2000U       /* no pulse for 2s → 0 mph         */
 #define VSS_MIN_PERIOD_TICKS    100U        /* < 100 ticks (~1.5 µs) is noise  */
 #define VSS_MAX_AVG             16          /* hard cap on smoothing window    */
@@ -54,8 +56,7 @@ static volatile uint8_t  vssBufCount = 0;   /* valid entries, capped at VSS_MAX_
  *   freq_Hz = TACH_TIM_CLK_HZ / period_ticks
  *   rpm     = freq_Hz × 60 / pulses_per_rev
  * -------------------------------------------------------------------------*/
-#define TACH_PRESCALER          999U
-#define TACH_TIM_CLK_HZ         64000U      /* 64 MHz / (TACH_PRESCALER + 1) */
+#define TACH_TIM_CLK_HZ         64000U      /* target tick rate; prescaler derived at init */
 #define TACH_TIMEOUT_MS         2000U       /* no pulse → 0 rpm */
 #define TACH_MIN_PERIOD_TICKS   5U          /* ignore impossibly fast pulses */
 #define TACH_EMA_ALPHA          0.35f       /* snappier than VSS — tach should feel live */
@@ -68,12 +69,13 @@ static volatile uint8_t  tachHaveFirstCap    = 0;
 void Inputs_Init(void)
 {
     /* TIM2 (VSS) — interrupt-driven input capture. */
+    vssTimClkHz = 2U * HAL_RCC_GetPCLK1Freq();
     HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1);
 
-    /* TIM1 (tach) — set prescaler at runtime so the 16-bit counter covers
-     * the slow-pulse case (cranking RPM) without overflow. CubeMX still
-     * generates Prescaler=0; this overrides it. TODO: set in the .ioc. */
-    __HAL_TIM_SET_PRESCALER(&htim1, TACH_PRESCALER);
+    /* TIM1 (tach) — derive the prescaler for a 64 kHz tick from the live
+     * clock so the 16-bit counter always covers cranking-RPM periods.
+     * CubeMX still generates Prescaler=0; this overrides it. */
+    __HAL_TIM_SET_PRESCALER(&htim1, (2U * HAL_RCC_GetPCLK2Freq()) / TACH_TIM_CLK_HZ - 1U);
     HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
 
     /* CubeMX didn't enable NVIC for either timer (input-capture-only timers
@@ -123,7 +125,7 @@ void Inputs_Update(void)
                 idx = (uint8_t)((idx + VSS_MAX_AVG - 1) % VSS_MAX_AVG);
             }
             uint32_t avgPeriod = (uint32_t)(sum / N);
-            inputs.speedMph = ((float)VSS_TIM_CLK_HZ * 3600.0f) /
+            inputs.speedMph = ((float)vssTimClkHz * 3600.0f) /
                               ((float)avgPeriod * (float)ppm);
         }
     }

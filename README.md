@@ -26,7 +26,19 @@ cmake --build --preset Release
 
 Flashing/debug is via the STM32 VS Code Extension (`.vscode/launch.json` is committed).
 
-> **Regeneration caution:** `DEPolarity = LTDC_DEPOLARITY_AL` in `MX_LTDC_Init` is a required fix (see NV3052C post-mortem) that lives in the CubeMX-generated region of `main.c` and is **not** captured in the `.ioc`. Set the LTDC DE polarity accordingly in CubeMX before regenerating, or the fix silently reverts and the center display goes dark.
+> **Regeneration caution:** the following required fixes live in CubeMX-generated
+> regions and are **not** captured in the `.ioc` — reapply (or set in CubeMX) after
+> any regeneration:
+> - `MX_LTDC_Init`: `DEPolarity = LTDC_DEPOLARITY_AL` (see NV3052C post-mortem;
+>   reverting turns the center display dark).
+> - `SystemClock_Config`: 400 MHz clock tree — VOS1, PLL1 M4/N50/P2/**Q16**
+>   (pll1_q must stay 50 MHz for FDCAN/SPI1 bit timing), SYSCLK=PLL1P,
+>   HPRE=/2, all APB=/2, `FLASH_LATENCY_2` + `WRHIGHFREQ=0b10`. Reverting to the
+>   generated 64 MHz HSI config is functional but slow.
+> - `MX_QUADSPI_Init`: `ClockPrescaler = 15` (ST77916 SCK ~12.5 MHz at
+>   HCLK3=200 MHz; the generated value of 4 would run the panel at 40 MHz).
+> - `HAL_I2C_MspInit`: `I2c123ClockSelection = RCC_I2C123CLKSOURCE_HSI` so the
+>   generated TIMINGR stays valid regardless of bus-clock changes.
 
 ## Project Layout
 

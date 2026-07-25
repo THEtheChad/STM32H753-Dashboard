@@ -72,13 +72,20 @@ static void ltdc_clk_restore(void)
     HAL_GPIO_Init(LTDC_CLK_PORT, &g);
 }
 
+/* Edge pacing: at 400 MHz the raw GPIO loop would clock SPI near the
+ * NV3052C's limits; ~150 ns per phase keeps SCK a comfortable ~2 MHz.
+ * Init is ~200 writes — still done in single-digit milliseconds. */
+static inline void bb_delay(void) { for (volatile int d = 0; d < 20; d++) {} }
+
 /* Clock out one 9-bit word (D/C bit + 8 data bits). CS must already be LOW. */
 static void spi_word_9(uint16_t word)
 {
     for (int i = 8; i >= 0; i--) {
         HAL_GPIO_WritePin(BB_SCK_PORT,  BB_SCK_PIN,  GPIO_PIN_RESET);
         HAL_GPIO_WritePin(BB_MOSI_PORT, BB_MOSI_PIN, ((word >> i) & 1) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+        bb_delay();
         HAL_GPIO_WritePin(BB_SCK_PORT,  BB_SCK_PIN,  GPIO_PIN_SET);
+        bb_delay();
     }
 }
 
