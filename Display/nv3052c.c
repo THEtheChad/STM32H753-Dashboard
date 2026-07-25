@@ -193,9 +193,13 @@ void NV3052C_Init(void)
     nv_reg(0x29, 0x00);   /* Display On */
     HAL_Delay(100);
 
-    /* Render the static gauge face, then hand the framebuffer to the LTDC. */
+    /* Render the static gauge face, then hand the framebuffer to the LTDC.
+     * Guard the clean: cache maintenance by address with the D-cache disabled
+     * raises an imprecise BusFault on the M7 (root cause of the 2026-07-25
+     * black-screen HardFault). */
     Gauge_RenderSpeedo(fb, NV3052C_WIDTH, NV3052C_HEIGHT, 55.0f);
-    SCB_CleanDCache_by_Addr((uint32_t *)fb, FB_BYTES);
+    if (SCB->CCR & SCB_CCR_DC_Msk)
+        SCB_CleanDCache_by_Addr((uint32_t *)fb, FB_BYTES);
 
     ltdc_clk_restore();
     __HAL_LTDC_ENABLE(&hltdc);

@@ -115,7 +115,11 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  /* CPU caches were never enabled; the Cortex-M7 is crippled without them and
+   * cache-maintenance ops (used for LTDC framebuffer coherence) hard-fault if
+   * executed while the D-cache is off. MPU_Config() has already run. */
+  SCB_EnableICache();
+  SCB_EnableDCache();
   /* USER CODE END Init */
 
   /* Configure the system clock */
