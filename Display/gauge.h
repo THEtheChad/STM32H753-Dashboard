@@ -6,6 +6,9 @@
 /* 256-entry CLUT for the L8 framebuffer (0x00RRGGBB, LTDC CLUTWR layout) */
 extern const uint32_t Gauge_CLUT[256];
 
+/* Pre-rendered 720x720 L8 face, generated into flash by tools/genface.c */
+extern const uint8_t Gauge_FaceImg[720 * 720];
+
 /* One-shot render: face + needle (used by the host-side preview). */
 void Gauge_RenderSpeedo(uint8_t *fb, int w, int h, float mph);
 

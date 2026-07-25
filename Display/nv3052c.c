@@ -9,16 +9,15 @@ extern LTDC_HandleTypeDef hltdc;
  * master, cannot read it. A pointer to 0x24000000 sidesteps the linker entirely.
  * 720*720*1 byte = 506.25 KB of the 512 KB bank; a full RGB565 buffer (1013 KB)
  * would not fit in any single bank, which is why the layer runs L8 + CLUT. */
-#define FB_BYTES   (NV3052C_WIDTH * NV3052C_HEIGHT)
-static uint8_t * const fb = (uint8_t *)0x24000000U;
-
-/* Needle sprite ping-pong buffers (AL44, 352x352) in the otherwise unused
- * D2 SRAM banks — one per bank. The back buffer is drawn off-screen, then
- * LTDC layer 2's shadow registers flip to it atomically at vertical
- * blanking, so the visible needle is never mid-update: tear-free by
- * construction, independent of drawing speed. Both banks are covered by
- * the write-through MPU region so no cache maintenance is needed. */
-static uint8_t * const spr[2] = { (uint8_t *)0x30000000U, (uint8_t *)0x30020000U };
+/* The static face lives in FLASH (Gauge_FaceImg, generated at build time
+ * by tools/genface.c) and the LTDC fetches layer 1 straight from there —
+ * the D2 SRAM banks turned out to be unreachable by the LTDC's bus master
+ * (continuous TERRIF transfer errors). That frees the whole 512 KB AXI
+ * SRAM for the needle sprite ping-pong buffers (AL44, 352x352): the back
+ * buffer is drawn off-screen, then layer 2's shadow registers flip to it
+ * atomically at vertical blanking — tear-free by construction. The AXI
+ * SRAM is write-through (MPU region 1), so no cache maintenance needed. */
+static uint8_t * const spr[2] = { (uint8_t *)0x24000000U, (uint8_t *)0x24020000U };
 #define SPR_BYTES  (GAUGE_SPR_PITCH * GAUGE_SPR_MAX)
 static int spr_back;
 
@@ -207,17 +206,7 @@ void NV3052C_Init(void)
     nv_reg(0x29, 0x00);   /* Display On */
     HAL_Delay(100);
 
-    /* Render the static gauge face (no needle — that lives on layer 2).
-     * Guard the clean: cache maintenance by address with the D-cache disabled
-     * raises an imprecise BusFault on the M7 (root cause of the 2026-07-25
-     * black-screen HardFault). */
-    Gauge_RenderFace(fb, NV3052C_WIDTH, NV3052C_HEIGHT);
-    if (SCB->CCR & SCB_CCR_DC_Msk)
-        SCB_CleanDCache_by_Addr((uint32_t *)fb, FB_BYTES);
-
-    /* Sprite RAM: D2 SRAM banks need their clocks; zero both buffers */
-    __HAL_RCC_D2SRAM1_CLK_ENABLE();
-    __HAL_RCC_D2SRAM2_CLK_ENABLE();
+    /* Face is pre-rendered in flash; only the sprite buffers need setup */
     for (uint32_t i = 0; i < SPR_BYTES; i++) { spr[0][i] = 0; spr[1][i] = 0; }
 
     ltdc_clk_restore();
@@ -236,7 +225,7 @@ void NV3052C_Init(void)
         cfg.Alpha0 = 0;
         cfg.BlendingFactor1 = LTDC_BLENDING_FACTOR1_CA;
         cfg.BlendingFactor2 = LTDC_BLENDING_FACTOR2_CA;
-        cfg.FBStartAdress = (uint32_t)fb;
+        cfg.FBStartAdress = (uint32_t)Gauge_FaceImg;   /* static face, in flash */
         cfg.ImageWidth  = NV3052C_WIDTH;
         cfg.ImageHeight = NV3052C_HEIGHT;
         HAL_LTDC_ConfigCLUT(&hltdc, (uint32_t *)Gauge_CLUT, 256, 0);

@@ -47,6 +47,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Display/st77916.c
     Display/nv3052c.c
     Display/gauge.c
+    Display/face_img.c
     CAN/holley_can.c
     Sensors/sensors.c
     Inputs/inputs.c

@@ -17,15 +17,19 @@ enum {
     C_DIM   = 7,   /* dim chrome accents, "MPH"   */
 };
 
+/* Each color lives at index i AND at i*17 ({i,i} nibble-replicated):
+ * L8 looks up the plain index, while AL44 expands its 4-bit index to
+ * {L,L} before the CLUT lookup — one table serves both layers no
+ * matter which addressing the hardware applies. */
 const uint32_t Gauge_CLUT[256] = {
     [C_BLACK]  = 0x000000,
-    [C_FACE]   = 0x1B1B1D,
-    [C_CREAM]  = 0xEFE3C2,
-    [C_RED]    = 0xD8321E,
-    [C_CHROME] = 0xC9CCD1,
-    [C_GRAY]   = 0x63666B,
-    [C_SHADOW] = 0x2E2F33,
-    [C_DIM]    = 0x8A8D92,
+    [C_FACE]   = 0x1B1B1D, [C_FACE   * 17] = 0x1B1B1D,
+    [C_CREAM]  = 0xEFE3C2, [C_CREAM  * 17] = 0xEFE3C2,
+    [C_RED]    = 0xD8321E, [C_RED    * 17] = 0xD8321E,
+    [C_CHROME] = 0xC9CCD1, [C_CHROME * 17] = 0xC9CCD1,
+    [C_GRAY]   = 0x63666B, [C_GRAY   * 17] = 0x63666B,
+    [C_SHADOW] = 0x2E2F33, [C_SHADOW * 17] = 0x2E2F33,
+    [C_DIM]    = 0x8A8D92, [C_DIM    * 17] = 0x8A8D92,
 };
 
 /* ---- geometry ---- */
@@ -33,7 +37,7 @@ const uint32_t Gauge_CLUT[256] = {
 #define SWEEP_DEG       240.0f
 #define MPH_MAX         120.0f
 
-static int W, H;
+static int W = 720, H = 720;   /* defaults so sprite drawing works without a face render */
 static uint8_t *FB;
 
 /* Undo log for the needle: every pixel it overwrites is recorded so the
