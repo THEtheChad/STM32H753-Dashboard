@@ -1,17 +1,18 @@
 # Bench Harness Pinout — Center Display (NV3052C)
 
-Verified 2026-07-25 against the expected netlist derived from the `.ioc`, the
-driver code, and the SF-TO400XC-8996A2-N panel spec — 35/35 connections correct.
-Recorded with [`docs/wiring-map.html`](docs/wiring-map.html); machine-readable
-source of truth is the exported JSON from that tool.
+Human-readable view of the verified harness. Source of truth is
+[`docs/wiring-map.json`](docs/wiring-map.json) (export of the recorder at
+[`docs/wiring-map.html`](docs/wiring-map.html)) — regenerate this file from it
+after any rewiring. Last verified 2026-07-25, 34/34 connections correct against
+the netlist expected from the `.ioc`, driver code, and panel spec.
 
 ## Panel (FPC-40P breakout J1) → Nucleo / DC-DC
 
 | FPC pin | Signal | Lands on | MCU pin | Wire color |
 |---|---|---|---|---|
 | 1 | LEDA (backlight +) | DC-DC OUT+ |  | red |
-| 2 | LEDK (backlight −) | CN9 pin 12 | GND | purple |
-| 3 | LEDK (backlight −) | CN7 pin 8 | GND | black |
+| 2 | LEDK (backlight −) | DC-DC OUT- |  | purple |
+| 3 | LEDK (backlight −) | DC-DC OUT- |  | black |
 | 4 | GND | GNDR pin 2 | GND | black |
 | 5 | VCI 3.3 V | CN8 pin 7 | 3V3 | yellow |
 | 6 | RESET | CN12 pin 68 | PG5 | brown |
@@ -44,19 +45,18 @@ source of truth is the exported JSON from that tool.
 
 Panel pins 7, 8 (NC) and 35–40 (touch, unpopulated) are unconnected by design.
 
-## Backlight power (DC-DC module)
+## Backlight / converter power
 
 | From | To | Wire color |
 |---|---|---|
 | CN8 pin 9 (5V) | DC-DC IN+ | red |
 | DC-DC IN- | CN8 pin 11 (GND) | purple |
-| DC-DC OUT- | CN8 pin 13 (GND) | purple |
 
 ## Notes
 
 - The panel exposes only two logic grounds (FPC 4 and 34); both are wired.
-- Known improvement: the backlight return (LEDK, FPC 2/3) currently lands on logic
-  ground rather than the DC-DC OUT− pad, so LED current shares the logic-ground
-  jumpers. Fine on the bench; reroute before the analog senders come online.
+- Star-ground topology: the backlight loop closes locally at the converter
+  (OUT+ → LEDA, LEDK ×2 → OUT−); the converter bonds to logic ground once, via
+  IN−. Reworked 2026-07-25 — LEDK previously returned through logic ground.
 - 2026-07-25: FPC-16 (B2) was found on CN10 pin 7 (PF4, floating) and moved to
   CN10 pin 5 (GND) — a one-row slip present since original assembly.

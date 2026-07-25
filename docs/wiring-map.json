@@ -1,0 +1,514 @@
+{
+  "format": "f100-bench-wiring",
+  "version": 1,
+  "exported": "2026-07-25T01:33:47.981Z",
+  "connections": [
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 1
+      },
+      "b": {
+        "board": "DCDC",
+        "conn": "U1",
+        "pin": "OUT+"
+      },
+      "color": "#e53935",
+      "colorName": "red"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 5
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN8",
+        "pin": 7,
+        "mcu": "3V3"
+      },
+      "color": "#fdd835",
+      "colorName": "yellow"
+    },
+    {
+      "a": {
+        "board": "NUCLEO",
+        "conn": "CN12",
+        "pin": 15,
+        "mcu": "PA7"
+      },
+      "b": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 9
+      },
+      "color": "#fb8c00",
+      "colorName": "orange"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 11
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN12",
+        "pin": 69,
+        "mcu": "PG4"
+      },
+      "color": "#fb8c00",
+      "colorName": "orange"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 13
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN9",
+        "pin": 11,
+        "mcu": "PF10"
+      },
+      "color": "#fb8c00",
+      "colorName": "orange"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 17
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN12",
+        "pin": 65,
+        "mcu": "PD10"
+      },
+      "color": "#1e88e5",
+      "colorName": "blue"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 21
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN7",
+        "pin": 4,
+        "mcu": "PB9"
+      },
+      "color": "#1e88e5",
+      "colorName": "blue"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 23
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN10",
+        "pin": 6,
+        "mcu": "PE11"
+      },
+      "color": "#43a047",
+      "colorName": "green"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 25
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN10",
+        "pin": 34,
+        "mcu": "PB11"
+      },
+      "color": "#43a047",
+      "colorName": "green"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 27
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN12",
+        "pin": 66,
+        "mcu": "PG8"
+      },
+      "color": "#43a047",
+      "colorName": "green"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 29
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN11",
+        "pin": 34,
+        "mcu": "PB0"
+      },
+      "color": "#43a047",
+      "colorName": "green"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 31
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN9",
+        "pin": 3,
+        "mcu": "PC0"
+      },
+      "color": "#e53935",
+      "colorName": "red"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 33
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN10",
+        "pin": 30,
+        "mcu": "PE15"
+      },
+      "color": "#e53935",
+      "colorName": "red"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 34
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN9",
+        "pin": 23,
+        "mcu": "GND"
+      },
+      "color": "#1a1a1a",
+      "colorName": "black"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 32
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN9",
+        "pin": 7,
+        "mcu": "PB1"
+      },
+      "color": "#e53935",
+      "colorName": "red"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 30
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN12",
+        "pin": 14,
+        "mcu": "PA11"
+      },
+      "color": "#e53935",
+      "colorName": "red"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 28
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN10",
+        "pin": 27,
+        "mcu": "GND"
+      },
+      "color": "#1a1a1a",
+      "colorName": "black"
+    },
+    {
+      "a": {
+        "board": "NUCLEO",
+        "conn": "CN7",
+        "pin": 11,
+        "mcu": "PC7"
+      },
+      "b": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 26
+      },
+      "color": "#f2f2f2",
+      "colorName": "white"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 24
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN10",
+        "pin": 32,
+        "mcu": "PB10"
+      },
+      "color": "#43a047",
+      "colorName": "green"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 22
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN7",
+        "pin": 12,
+        "mcu": "PA6"
+      },
+      "color": "#43a047",
+      "colorName": "green"
+    },
+    {
+      "a": {
+        "board": "NUCLEO",
+        "conn": "CN7",
+        "pin": 2,
+        "mcu": "PB8"
+      },
+      "b": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 20
+      },
+      "color": "#1e88e5",
+      "colorName": "blue"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 18
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN12",
+        "pin": 49,
+        "mcu": "PE12"
+      },
+      "color": "#1e88e5",
+      "colorName": "blue"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 19
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN12",
+        "pin": 37,
+        "mcu": "PA3"
+      },
+      "color": "#1e88e5",
+      "colorName": "blue"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 15
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN7",
+        "pin": 1,
+        "mcu": "PC6"
+      },
+      "color": "#fb8c00",
+      "colorName": "orange"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 14
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN7",
+        "pin": 17,
+        "mcu": "PA4"
+      },
+      "color": "#fb8c00",
+      "colorName": "orange"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 12
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN10",
+        "pin": 8,
+        "mcu": "PE14"
+      },
+      "color": "#6d4c41",
+      "colorName": "brown"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 10
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN11",
+        "pin": 70,
+        "mcu": "PG11"
+      },
+      "color": "#fb8c00",
+      "colorName": "orange"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 6
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN12",
+        "pin": 68,
+        "mcu": "PG5"
+      },
+      "color": "#6d4c41",
+      "colorName": "brown"
+    },
+    {
+      "a": {
+        "board": "NUCLEO",
+        "conn": "CN8",
+        "pin": 9,
+        "mcu": "5V"
+      },
+      "b": {
+        "board": "DCDC",
+        "conn": "U1",
+        "pin": "IN+"
+      },
+      "color": "#e53935",
+      "colorName": "red"
+    },
+    {
+      "a": {
+        "board": "DCDC",
+        "conn": "U1",
+        "pin": "IN-"
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN8",
+        "pin": 11,
+        "mcu": "GND"
+      },
+      "color": "#8e24aa",
+      "colorName": "purple"
+    },
+    {
+      "a": {
+        "board": "NUCLEO",
+        "conn": "GNDR",
+        "pin": 2,
+        "mcu": "GND"
+      },
+      "b": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 4
+      },
+      "color": "#1a1a1a",
+      "colorName": "black"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 16
+      },
+      "b": {
+        "board": "NUCLEO",
+        "conn": "CN10",
+        "pin": 5,
+        "mcu": "GND"
+      },
+      "color": "#1a1a1a",
+      "colorName": "black"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 3
+      },
+      "b": {
+        "board": "DCDC",
+        "conn": "U1",
+        "pin": "OUT-"
+      },
+      "color": "#1a1a1a",
+      "colorName": "black"
+    },
+    {
+      "a": {
+        "board": "FPC40",
+        "conn": "J1",
+        "pin": 2
+      },
+      "b": {
+        "board": "DCDC",
+        "conn": "U1",
+        "pin": "OUT-"
+      },
+      "color": "#8e24aa",
+      "colorName": "purple"
+    }
+  ]
+}
