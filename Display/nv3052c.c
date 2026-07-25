@@ -24,6 +24,7 @@ static float spr_mph[2] = { -1.0f, -1.0f };   /* shape each buffer holds */
 
 /* needle-draw cost telemetry, readable over SWD (tools/perf notes) */
 volatile uint32_t NV3052C_NeedleCycles, NV3052C_NeedleCyclesMax;
+volatile uint32_t NV3052C_FrameIntervalMs;
 
 /* -------------------------------------------------------------------------
  * Bit-bang 9-bit SPI
@@ -273,24 +274,25 @@ void NV3052C_Init(void)
     }
 }
 
-/* Animate the needle at ~50 FPS: an ignition sweep (0-120-0), then a
- * simulated cruise until real speed data is wired in. A low-pass filter
- * gives the needle damped, instrument-like motion. The needle is drawn
- * into the OFF-SCREEN sprite buffer, then layer 2's shadow registers
- * flip to it — the hardware applies position, size, and address as one
- * atomic set at vertical blanking, so no partially drawn needle can
- * ever reach the panel. */
+/* Animate the needle locked to the panel's vertical blanking (~74.9 Hz):
+ * as soon as the previous flip has latched, draw the next frame and
+ * queue it — every panel refresh carries a fresh needle position, the
+ * smoothest cadence this glass can display (no pulldown judder). An
+ * ignition sweep (0-100-0), then a simulated cruise until real speed
+ * data arrives; damping is time-based so the feel is frame-rate
+ * independent. The needle is drawn into the OFF-SCREEN sprite buffer,
+ * then layer 2's shadow registers flip atomically at vblank. */
 void NV3052C_Update(void)
 {
     static uint32_t lastFrame = 0;
     static float    shown     = 0.0f;
 
-    uint32_t now = HAL_GetTick();
-    if (now - lastFrame < 20U) return;
-
     /* previous flip not yet latched by the hardware? try again next pass */
     if (hltdc.Instance->SRCR & (LTDC_SRCR_VBR | LTDC_SRCR_IMR)) return;
 
+    uint32_t now = HAL_GetTick();
+    float dt = (float)(now - lastFrame);
+    NV3052C_FrameIntervalMs = now - lastFrame;
     lastFrame = now;
 
     float target;
@@ -304,7 +306,9 @@ void NV3052C_Update(void)
     if (target < 0.0f)   target = 0.0f;
     if (target > 100.0f) target = 100.0f;
 
-    shown += (target - shown) * 0.15f;      /* needle damping */
+    /* damped needle, ~123 ms time constant regardless of frame rate
+     * (matches the old 0.15-per-20ms feel) */
+    shown += (target - shown) * (1.0f - expf(-dt / 123.0f));
 
     /* draw into the back buffer (invisible), then queue the atomic flip */
     int x, y, w, h;
