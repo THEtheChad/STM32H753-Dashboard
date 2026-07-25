@@ -20,6 +20,10 @@ extern LTDC_HandleTypeDef hltdc;
 static uint8_t * const spr[2] = { (uint8_t *)0x24000000U, (uint8_t *)0x24020000U };
 #define SPR_BYTES  (GAUGE_SPR_PITCH * GAUGE_SPR_MAX)
 static int spr_back;
+static float spr_mph[2] = { -1.0f, -1.0f };   /* shape each buffer holds */
+
+/* needle-draw cost telemetry, readable over SWD (tools/perf notes) */
+volatile uint32_t NV3052C_NeedleCycles, NV3052C_NeedleCyclesMax;
 
 /* -------------------------------------------------------------------------
  * Bit-bang 9-bit SPI
@@ -209,6 +213,11 @@ void NV3052C_Init(void)
     /* Face is pre-rendered in flash; only the sprite buffers need setup */
     for (uint32_t i = 0; i < SPR_BYTES; i++) { spr[0][i] = 0; spr[1][i] = 0; }
 
+    /* DWT cycle counter for draw-cost telemetry */
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
     ltdc_clk_restore();
     __HAL_LTDC_ENABLE(&hltdc);
     hltdc.Instance->BCCR = 0x00000000U;
@@ -237,7 +246,8 @@ void NV3052C_Init(void)
      * everything outside the needle is transparent over the face. */
     {
         int x, y, w, h;
-        Gauge_DrawNeedleSprite(spr[0], 0.0f, &x, &y, &w, &h);
+        Gauge_DrawNeedleSprite(spr[0], 0.0f, spr_mph[0], &x, &y, &w, &h);
+        spr_mph[0] = 0.0f;
         LTDC_LayerCfgTypeDef cfg = {0};
         cfg.WindowX0 = (uint32_t)x; cfg.WindowX1 = (uint32_t)(x + w);
         cfg.WindowY0 = (uint32_t)y; cfg.WindowY1 = (uint32_t)(y + h);
@@ -291,7 +301,12 @@ void NV3052C_Update(void)
 
     /* draw into the back buffer (invisible), then queue the atomic flip */
     int x, y, w, h;
-    Gauge_DrawNeedleSprite(spr[spr_back], shown, &x, &y, &w, &h);
+    uint32_t t0 = DWT->CYCCNT;
+    Gauge_DrawNeedleSprite(spr[spr_back], shown, spr_mph[spr_back], &x, &y, &w, &h);
+    NV3052C_NeedleCycles = DWT->CYCCNT - t0;
+    if (NV3052C_NeedleCycles > NV3052C_NeedleCyclesMax)
+        NV3052C_NeedleCyclesMax = NV3052C_NeedleCycles;
+    spr_mph[spr_back] = shown;
     __DSB();                                /* sprite writes drained to RAM */
 
     uint32_t ahbp = (hltdc.Instance->BPCR >> 16) & 0xFFFU;

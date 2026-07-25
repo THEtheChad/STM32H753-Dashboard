@@ -26,7 +26,7 @@ void Gauge_SetNeedle(float mph, uint32_t *dirty_first, uint32_t *dirty_last);
  * box it uses. Returns the sprite's screen position and size. */
 #define GAUGE_SPR_PITCH 352
 #define GAUGE_SPR_MAX   352
-void Gauge_DrawNeedleSprite(uint8_t *buf, float mph,
+void Gauge_DrawNeedleSprite(uint8_t *buf, float mph, float prev_mph,
                             int *x, int *y, int *w, int *h);
 
 #endif /* GAUGE_H */

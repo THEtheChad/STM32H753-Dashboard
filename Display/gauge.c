@@ -316,51 +316,69 @@ void Gauge_RenderSpeedo(uint8_t *fb, int w, int h, float mph) {
     Gauge_SetNeedle(mph, 0, 0);
 }
 
-/* ---- needle sprite (AL44) for LTDC layer-2 compositing ---- */
+/* ---- needle sprite (AL44) for LTDC layer-2 compositing ----
+ *
+ * Rasterization walks ALONG the needle spine painting perpendicular
+ * spans, so cost is proportional to the needle's actual area and flat
+ * across all angles. (The previous distance-field rasterizer walked the
+ * bounding box, which is ~7x larger at diagonal angles — the cause of
+ * the sluggish needle 45 degrees off center at 64 MHz.)
+ *
+ * Erasing re-walks the PREVIOUS needle shape writing transparent, so no
+ * box clear is needed either; the caller passes the mph the buffer
+ * currently holds (negative = buffer is known-zeroed). */
 
-static void sprite_seg(uint8_t *buf, int w, int h,
-                       float x0, float y0, float x1, float y1, float sw, uint8_t val) {
-    float hw = sw * 0.5f;
-    int minx = (int)fminf(x0, x1) - (int)hw - 1, maxx = (int)fmaxf(x0, x1) + (int)hw + 1;
-    int miny = (int)fminf(y0, y1) - (int)hw - 1, maxy = (int)fmaxf(y0, y1) + (int)hw + 1;
-    if (minx < 0) minx = 0;
-    if (maxx >= w) maxx = w - 1;
-    if (miny < 0) miny = 0;
-    if (maxy >= h) maxy = h - 1;
-    float vx = x1 - x0, vy = y1 - y0, len2 = vx*vx + vy*vy;
-    for (int y = miny; y <= maxy; y++)
-        for (int x = minx; x <= maxx; x++) {
-            float t = len2 > 0 ? ((x - x0)*vx + (y - y0)*vy) / len2 : 0;
-            t = t < 0 ? 0 : (t > 1 ? 1 : t);
-            float dx = x - (x0 + t*vx), dy = y - (y0 + t*vy);
-            if (dx*dx + dy*dy <= hw*hw) buf[y * GAUGE_SPR_PITCH + x] = val;
+static void needle_span(uint8_t *buf, float x0, float y0, float x1, float y1,
+                        float wd, uint8_t val) {
+    float dx = x1 - x0, dy = y1 - y0;
+    float len = sqrtf(dx*dx + dy*dy);
+    if (len < 1e-3f) return;
+    float ux = dx / len, uy = dy / len;    /* spine direction  */
+    float nx = -uy, ny = ux;               /* span direction   */
+    float hw = wd * 0.5f;
+    for (float s = 0.0f; s <= len; s += 0.6f)
+        for (float t = -hw; t <= hw; t += 0.6f) {
+            int x = (int)(x0 + ux*s + nx*t + 0.5f);
+            int y = (int)(y0 + uy*s + ny*t + 0.5f);
+            if ((unsigned)x < GAUGE_SPR_MAX && (unsigned)y < GAUGE_SPR_MAX)
+                buf[y * GAUGE_SPR_PITCH + x] = val;
         }
 }
 
-void Gauge_DrawNeedleSprite(uint8_t *buf, float mph,
-                            int *out_x, int *out_y, int *out_w, int *out_h) {
+/* bounding box of the needle at a given speed, sprite-local origin */
+static void needle_bbox(float mph, int *minx, int *miny, int *w, int *h) {
     float a = mph_angle(mph), ca = cosf(a), sa = sinf(a);
-
-    /* lance from just outside the hub (40) to inside the ticks (276) */
     float ex0 = 36.0f, ex1 = 280.0f;
-    int minx = (int)floorf(fminf(ex0*ca, ex1*ca)) - 7;
-    int maxx = (int)ceilf (fmaxf(ex0*ca, ex1*ca)) + 7;
-    int miny = (int)floorf(fminf(ex0*sa, ex1*sa)) - 7;
-    int maxy = (int)ceilf (fmaxf(ex0*sa, ex1*sa)) + 7;
-    int w = maxx - minx + 1, h = maxy - miny + 1;
-    if (w > GAUGE_SPR_MAX) w = GAUGE_SPR_MAX;
-    if (h > GAUGE_SPR_MAX) h = GAUGE_SPR_MAX;
+    *minx = (int)floorf(fminf(ex0*ca, ex1*ca)) - 7;
+    int maxx = (int)ceilf(fmaxf(ex0*ca, ex1*ca)) + 7;
+    *miny = (int)floorf(fminf(ex0*sa, ex1*sa)) - 7;
+    int maxy = (int)ceilf(fmaxf(ex0*sa, ex1*sa)) + 7;
+    *w = maxx - *minx + 1;
+    *h = maxy - *miny + 1;
+    if (*w > GAUGE_SPR_MAX) *w = GAUGE_SPR_MAX;
+    if (*h > GAUGE_SPR_MAX) *h = GAUGE_SPR_MAX;
+}
 
-    for (int r = 0; r < h; r++)
-        for (int c = 0; c < w; c++) buf[r * GAUGE_SPR_PITCH + c] = 0;
-
+/* draw (or erase, with zero values) the needle in its own bbox frame */
+static void needle_walk(uint8_t *buf, float mph, uint8_t core, uint8_t edge) {
+    int minx, miny, w, h;
+    needle_bbox(mph, &minx, &miny, &w, &h);
+    float a = mph_angle(mph), ca = cosf(a), sa = sinf(a);
     float ox = (float)-minx, oy = (float)-miny;
-    /* dark edge first, bright orange core over it */
-    sprite_seg(buf, w, h, ox + 37.0f*ca, oy + 37.0f*sa, ox + 170.0f*ca, oy + 170.0f*sa, 9.0f, 0xF0 | SPN_EDGE);
-    sprite_seg(buf, w, h, ox + 170.0f*ca, oy + 170.0f*sa, ox + 276.0f*ca, oy + 276.0f*sa, 4.5f, 0xF0 | SPN_EDGE);
-    sprite_seg(buf, w, h, ox + 38.0f*ca, oy + 38.0f*sa, ox + 170.0f*ca, oy + 170.0f*sa, 6.2f, 0xF0 | SPN_CORE);
-    sprite_seg(buf, w, h, ox + 170.0f*ca, oy + 170.0f*sa, ox + 272.0f*ca, oy + 272.0f*sa, 2.2f, 0xF0 | SPN_CORE);
+    needle_span(buf, ox + 37.0f*ca, oy + 37.0f*sa, ox + 170.0f*ca, oy + 170.0f*sa, 9.0f, edge);
+    needle_span(buf, ox + 170.0f*ca, oy + 170.0f*sa, ox + 276.0f*ca, oy + 276.0f*sa, 4.5f, edge);
+    needle_span(buf, ox + 38.0f*ca, oy + 38.0f*sa, ox + 170.0f*ca, oy + 170.0f*sa, 6.2f, core);
+    needle_span(buf, ox + 170.0f*ca, oy + 170.0f*sa, ox + 272.0f*ca, oy + 272.0f*sa, 2.2f, core);
+}
 
+void Gauge_DrawNeedleSprite(uint8_t *buf, float mph, float prev_mph,
+                            int *out_x, int *out_y, int *out_w, int *out_h) {
+    if (prev_mph >= 0.0f)                          /* erase previous shape */
+        needle_walk(buf, prev_mph, 0x00, 0x00);
+    needle_walk(buf, mph, 0xF0 | SPN_CORE, 0xF0 | SPN_EDGE);
+
+    int minx, miny, w, h;
+    needle_bbox(mph, &minx, &miny, &w, &h);
     *out_x = W / 2 + minx;
     *out_y = H / 2 + miny;
     *out_w = w;
