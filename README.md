@@ -60,7 +60,13 @@ cmake/          Toolchain + STM32H7 cmake helpers
 ## Current Status
 
 - **ST77916 driver:** working — solid color test confirmed
-- **NV3052C driver:** working — half-screen issue resolved (see post-mortem below); currently runs a background-color cycling diagnostic, real gauge rendering not yet implemented
+- **NV3052C center display:** fully working — renders a 1960 F-100-styled speedometer
+  (after `Dash Reference.jpg`): static face pre-rendered to flash (L8 + CLUT,
+  `tools/genface.c`), needle as a double-buffered AL44 sprite on LTDC layer 2,
+  flipped atomically at vblank (tear-free), ~50 FPS with angle-flat draw cost.
+  Speed data is simulated until the VSS/CAN sources are wired in.
+- **CPU:** 400 MHz (PLL1, VOS1); draw-cost telemetry readable over SWD
+  (`NV3052C_NeedleCycles`), screenshots via `tools/fbshot.py`
 - **CAN / ADC / pulse inputs:** implemented, not yet validated against real vehicle signals
 
 ## NV3052C half-screen issue — resolved (2026-07-24)
@@ -72,4 +78,4 @@ For a long stretch of this project the center display showed a perfect 50/50 ver
 
 The decisive diagnostic: frame-by-frame analysis of phone video showed the garbled half was statistically frozen across background-color changes — those columns never latched *any* data, which eliminated signal-integrity and defective-panel theories (a constant input can't produce static multicolor stripes, and a dead bank wouldn't move with `ss`) and pointed at init delivery.
 
-`0x23` and MADCTL are back at the manufacturer's golden values (`0xA0` / `0x0A`). Verified on hardware: full-screen saturated RGB cycling, uniform edge to edge, correct hues.
+`0x23` is back at the manufacturer's golden `0xA0`; MADCTL runs `0x02` — the golden `0x0A` carries a bgr bit that assumes a BGR-ordered host bus, and our LTDC wiring is straight RGB (it rendered red as blue). Verified on hardware: full-screen saturated color, uniform edge to edge, correct hues.
