@@ -52,6 +52,13 @@
   #toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
            background: #1c2128; border: 1px solid var(--line); color: var(--text-bright);
            padding: 8px 16px; border-radius: 6px; opacity: 0; transition: opacity .25s; z-index: 11; }
+  #padmenu { position: fixed; background: #1c2128; border: 1px solid var(--line); border-radius: 6px;
+             padding: 4px; display: none; z-index: 12; min-width: 170px; }
+  .padrow { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 4px;
+            cursor: pointer; font-family: ui-monospace, monospace; font-size: 12px; color: var(--text-bright); }
+  .padrow:hover { background: #3b434e; }
+  .padrow .chip { width: 13px; height: 13px; border-radius: 3px; border: 1px solid rgba(255,255,255,.35); flex: none; }
+  .padrow.new { color: var(--accent); font-family: inherit; }
 
   /* SVG element classes */
   .board { fill: #2d3a2e; stroke: #57ab5a55; stroke-width: 1.5; rx: 8; }
@@ -104,6 +111,7 @@
 <div id="stage"><svg id="svg"></svg></div>
 <div id="tip"></div>
 <div id="toast"></div>
+<div id="padmenu"></div>
 
 <script>
 "use strict";
@@ -182,7 +190,7 @@ for (let n = 1; n <= 40; n++) {
 }
 // DC-DC converter module: two wires allowed per solder pad
 [["IN+",830,560],["IN-",830,625],["OUT+",1010,560],["OUT-",1010,625]]
-  .forEach(([p,x,y]) => addPin(`DCDC:U1:${p}`, x, y, "DCDC", "U1", p, null, 2));
+  .forEach(([p,x,y]) => addPin(`DCDC:U1:${p}`, x, y, "DCDC", "U1", p, null, 4));
 
 function pinTitle(p) {
   if (p.conn === "GNDL" || p.conn === "GNDR")
@@ -288,22 +296,60 @@ let pending = null, pendingRing = null, selectedConn = null, nextId = 1;
 
 function occupancy(pinId) { return conns.filter(c => c.a === pinId || c.b === pinId).length; }
 
+function wedgePath(cx, cy, r, a0, a1) {
+  const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+  const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+  const large = (a1 - a0) > Math.PI ? 1 : 0;
+  return `M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} Z`;
+}
+
+function beginPending(p) {
+  pending = p.id;
+  pendingRing = el("circle", { cx:p.x, cy:p.y, r:8, class:"pending-ring" }, layers.overlay);
+  p.circle.classList.add("pending");
+  setStatus(`<b>${pinTitle(p)}</b> selected — click the wire's other end`);
+}
 function clickPin(p) {
   if (selectedConn) selectConn(null);
+  hidePadMenu();
   if (pending === p.id) { cancelPending(); return; }
   const occ = occupancy(p.id);
   if (!pending) {
+    if (p.cap > 1 && occ > 0) { openPadMenu(p); return; }         // multi-wire pad: pick from menu
     if (occ >= p.cap) { selectConn(connsOf(p.id)[0]); return; }   // full pin: select its wire
-    pending = p.id;
-    pendingRing = el("circle", { cx:p.x, cy:p.y, r:8, class:"pending-ring" }, layers.overlay);
-    p.circle.classList.add("pending");
-    setStatus(`<b>${pinTitle(p)}</b> selected — click the wire's other end`);
+    beginPending(p);
   } else {
-    if (occ >= p.cap) { toast(`${pinShort(p)} already has ${p.cap === 1 ? "a wire" : "two wires"}`); return; }
+    if (occ >= p.cap) { toast(`${pinShort(p)} already holds ${occ} wire${occ > 1 ? "s" : ""} (max ${p.cap})`); return; }
     const a = pending; cancelPending();
     addConn(a, p.id, currentColor, currentColorName);
   }
 }
+
+/* mini-menu for multi-wire pads */
+function openPadMenu(p) {
+  const m = document.getElementById("padmenu");
+  m.innerHTML = "";
+  for (const c of connsOf(p.id)) {
+    const other = pins.get(c.a === p.id ? c.b : c.a);
+    const row = document.createElement("div");
+    row.className = "padrow";
+    row.innerHTML = `<span class="chip" style="background:${c.color}"></span>⇄ ${pinShort(other)} (${c.colorName})`;
+    row.onclick = ev => { ev.stopPropagation(); hidePadMenu(); selectConn(c); };
+    m.appendChild(row);
+  }
+  if (occupancy(p.id) < p.cap) {
+    const row = document.createElement("div");
+    row.className = "padrow new";
+    row.textContent = "+ start new wire";
+    row.onclick = ev => { ev.stopPropagation(); hidePadMenu(); beginPending(p); };
+    m.appendChild(row);
+  }
+  const r = svg.getBoundingClientRect();
+  m.style.left = (r.left + (p.x - view.x) / view.w * r.width + 14) + "px";
+  m.style.top  = (r.top  + (p.y - view.y) / view.h * r.height - 10) + "px";
+  m.style.display = "block";
+}
+function hidePadMenu() { document.getElementById("padmenu").style.display = "none"; }
 function cancelPending() {
   if (!pending) return;
   pins.get(pending).circle.classList.remove("pending");
@@ -356,11 +402,19 @@ function setStatus(html) {
 }
 function refresh() {
   for (const p of pins.values()) {
-    const n = occupancy(p.id);
+    const cs = connsOf(p.id), n = cs.length;
     p.circle.classList.toggle("occupied", n > 0);
     // inline style, not attribute: presentation attributes lose to .pin CSS.
-    // Empty pin = hollow grey circle; bound pin = filled with its wire color.
-    p.circle.style.fill = n > 0 ? connsOf(p.id)[0].color : "";
+    // Empty pin = hollow grey circle; one wire = solid fill; several = pie wedges.
+    p.circle.style.fill = n === 1 ? cs[0].color : "";
+    if (p.wedges) { p.wedges.remove(); p.wedges = null; }
+    if (n > 1) {
+      p.wedges = el("g", { "pointer-events": "none" }, layers.pins);
+      cs.forEach((c, i) => {
+        const a0 = -Math.PI/2 + i * 2*Math.PI/n, a1 = -Math.PI/2 + (i+1) * 2*Math.PI/n;
+        el("path", { d: wedgePath(p.x, p.y, 5, a0, a1), fill: c.color }, p.wedges);
+      });
+    }
   }
   const list = document.getElementById("connList");
   list.innerHTML = "";
@@ -450,6 +504,7 @@ function toast(msg) {
 /* ------------ zoom / pan ------------ */
 svg.addEventListener("wheel", ev => {
   ev.preventDefault();
+  hidePadMenu();
   const k = ev.deltaY > 0 ? 1.12 : 1/1.12;
   const r = svg.getBoundingClientRect();
   const px = view.x + (ev.clientX - r.left) / r.width  * view.w;
@@ -470,8 +525,8 @@ window.addEventListener("mousemove", ev => {
   applyView();
 });
 window.addEventListener("mouseup", () => panning = null);
-svg.addEventListener("click", () => { cancelPending(); selectConn(null); });
-window.addEventListener("keydown", ev => { if (ev.key === "Escape") { cancelPending(); selectConn(null); } });
+svg.addEventListener("click", () => { cancelPending(); selectConn(null); hidePadMenu(); });
+window.addEventListener("keydown", ev => { if (ev.key === "Escape") { cancelPending(); selectConn(null); hidePadMenu(); } });
 
 /* ------------ boot ------------ */
 updatePalette(); setStatus(""); refresh();
