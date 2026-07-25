@@ -154,7 +154,10 @@ static const nv_reg_t nv_init[] = {
      * showed the garbled half never latches ANY data (stripes frozen across
      * BCCR color changes) — consistent with the panel running on power-on
      * defaults because the page 1-3 init never applied (see nv_write). */
-    {0x36,0x0A},  /* MADCTL — manufacturer's value */
+    {0x36,0x02},  /* MADCTL — golden value is 0x0A, but its bgr bit (D3) assumes
+                   * a BGR-ordered host bus; our LTDC wiring is straight RGB
+                   * (verified in pinout.md), and 0x0A rendered red as blue.
+                   * 0x02 keeps ss=1 (scan direction) with bgr=0. */
 };
 
 /* -------------------------------------------------------------------------
@@ -239,6 +242,17 @@ void NV3052C_Update(void)
 
     uint32_t now = HAL_GetTick();
     if (now - lastFrame < 20U) return;
+
+    /* Anti-tearing: only mutate the framebuffer during vertical blanking.
+     * CPSR reports the scan position; past the accumulated active height
+     * there are front porch + sync + back porch (~71 lines, ~1.2 ms at
+     * this timing) before the panel reads again — far more than the
+     * needle update needs. If the scanline is mid-frame, punt to the
+     * next main-loop pass and check again. */
+    uint32_t aah = hltdc.Instance->AWCR & 0x7FFU;
+    uint32_t y   = hltdc.Instance->CPSR & 0xFFFFU;
+    if (y <= aah) return;
+
     lastFrame = now;
 
     float target;
