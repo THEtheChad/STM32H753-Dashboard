@@ -1,49 +1,77 @@
-/* Retro F-100 speedometer face, rendered once into the L8 framebuffer.
- * Styling: charcoal face, cream ticks/numerals, red tapered needle,
- * chrome bezel. 0-120 MPH over a 240° sweep (0 at lower-left, 60 up top). */
+/* 1960 Ford F-100 speedometer, amber night-lit, after the reference photo
+ * (Dash Reference.jpg): spun-aluminum center dome, dark warm band with
+ * rotated 0-100 numerals, fine ticks, odometer drum window, off-state
+ * turn arrows, thin orange lance needle under a chrome hub.
+ *
+ * The face renders at build time (tools/genface.c) into flash; only the
+ * needle sprite is drawn at runtime. Rendering cost here is free. */
 
 #include "gauge.h"
 #include <math.h>
 
-/* ---- palette ---- */
+/* ---- palette ------------------------------------------------------------
+ * One CLUT serves both layers. AL44 (needle sprite) expands its 4-bit
+ * index to {L,L}, so multiples of 17 belong to the sprite; the face (L8)
+ * uses everything else. */
 enum {
-    C_BLACK = 0,   /* outside face / gaps        */
-    C_FACE  = 1,   /* charcoal dial face          */
-    C_CREAM = 2,   /* ticks, numerals             */
-    C_RED   = 3,   /* needle                      */
-    C_CHROME= 4,   /* bezel highlight, needle cap */
-    C_GRAY  = 5,   /* hub                         */
-    C_SHADOW= 6,   /* hub inner shadow            */
-    C_DIM   = 7,   /* dim chrome accents, "MPH"   */
+    C_BLACK    = 0,
+    C_BAND     = 1,   /* warm bronze band                  */
+    C_BAND_DK  = 2,   /* band, outer/darker                */
+    SPN_CORE   = 3,   /* sprite nibble: needle core        */
+    C_SEAM     = 4,   /* dark seams / recesses             */
+    C_CREAM    = 5,   /* markings                          */
+    C_CREAM_HI = 6,   /* markings, highlighted             */
+    C_ARROW    = 7,   /* unlit turn arrows                 */
+    C_ODO_CELL = 8,   /* odometer drum, amber backlit      */
+    SPN_EDGE   = 9,   /* sprite nibble: needle dark edge   */
+    C_ODO_DIG  = 10,  /* odometer digits                   */
+    C_ODO_FRM  = 11,  /* odometer chrome frame             */
+    C_ODO_BG   = 12,  /* odometer recess                   */
+    C_HUB_HI   = 13,  /* hub chrome, lit side              */
+    C_HUB_MID  = 14,
+    C_HUB_LO   = 15,
+    C_DOME_RIM = 16,  /* bright ring at dome edge          */
 };
+static const uint8_t DOME_RAMP[12]  = {20,21,22,23,24,25,26,27,28,29,30,31};
+static const uint8_t BEZEL_RAMP[5]  = {40,41,42,43,44};
 
-/* Each color lives at index i AND at i*17 ({i,i} nibble-replicated):
- * L8 looks up the plain index, while AL44 expands its 4-bit index to
- * {L,L} before the CLUT lookup — one table serves both layers no
- * matter which addressing the hardware applies. */
 const uint32_t Gauge_CLUT[256] = {
-    [C_BLACK]  = 0x000000,
-    [C_FACE]   = 0x1B1B1D, [C_FACE   * 17] = 0x1B1B1D,
-    [C_CREAM]  = 0xEFE3C2, [C_CREAM  * 17] = 0xEFE3C2,
-    [C_RED]    = 0xD8321E, [C_RED    * 17] = 0xD8321E,
-    [C_CHROME] = 0xC9CCD1, [C_CHROME * 17] = 0xC9CCD1,
-    [C_GRAY]   = 0x63666B, [C_GRAY   * 17] = 0x63666B,
-    [C_SHADOW] = 0x2E2F33, [C_SHADOW * 17] = 0x2E2F33,
-    [C_DIM]    = 0x8A8D92, [C_DIM    * 17] = 0x8A8D92,
+    [C_BLACK]    = 0x000000,
+    [C_BAND]     = 0x54381A,
+    [C_BAND_DK]  = 0x3A2712,
+    [C_SEAM]     = 0x221506,
+    [C_CREAM]    = 0xF3D492,
+    [C_CREAM_HI] = 0xFFE7B0,
+    [C_ARROW]    = 0x1C1206,
+    [C_ODO_CELL] = 0xDD9838,
+    [C_ODO_DIG]  = 0x201302,
+    [C_ODO_FRM]  = 0xD9B87A,
+    [C_ODO_BG]   = 0x120C04,
+    [C_HUB_HI]   = 0xF6E0B0,
+    [C_HUB_MID]  = 0xC9A263,
+    [C_HUB_LO]   = 0x8A6A38,
+    [C_DOME_RIM] = 0xF0C57E,
+    /* spun dome ramp, dark to bright amber metal */
+    [20] = 0x6E4A22, [21] = 0x7A5428, [22] = 0x875E2E, [23] = 0x946935,
+    [24] = 0xA1743B, [25] = 0xAE7F42, [26] = 0xBB8A49, [27] = 0xC79550,
+    [28] = 0xD4A057, [29] = 0xE0AB5E, [30] = 0xE7B468, [31] = 0xEDBE72,
+    /* bezel chrome ramp, warm */
+    [40] = 0x7A5C30, [41] = 0x9A7A44, [42] = 0xBC9858, [43] = 0xD9B672, [44] = 0xEDCB8B,
+    /* sprite colors at {L,L} addresses (AL44 lookup) + plain-index mirrors
+     * so the host preview and L8 paths agree */
+    [SPN_CORE]      = 0xF56528, [SPN_CORE * 17] = 0xF56528,
+    [SPN_EDGE]      = 0x99330E, [SPN_EDGE * 17] = 0x99330E,
 };
 
 /* ---- geometry ---- */
 #define SWEEP_START_DEG 150.0f   /* 0 MPH, screen-space angle (y down) */
 #define SWEEP_DEG       240.0f
-#define MPH_MAX         120.0f
+#define MPH_MAX         100.0f
 
-static int W = 720, H = 720;   /* defaults so sprite drawing works without a face render */
+static int W = 720, H = 720;
 static uint8_t *FB;
 
-/* Undo log for the needle: every pixel it overwrites is recorded so the
- * next frame can restore the face without keeping a second framebuffer
- * (there is no RAM for one). Restores run in reverse so overlapping
- * writes within one frame unwind correctly. */
+/* Undo log for the host-preview needle path (firmware needle is a sprite) */
 #define UNDO_MAX 6000
 static uint32_t undo_off[UNDO_MAX];
 static uint8_t  undo_val[UNDO_MAX];
@@ -71,17 +99,6 @@ static inline void px(int x, int y, uint8_t c) {
     }
 }
 
-static void draw_ring(int cx, int cy, int r0, int r1, uint8_t c) {
-    for (int y = cy - r1; y <= cy + r1; y++)
-        for (int x = cx - r1; x <= cx + r1; x++) {
-            int dx = x - cx, dy = y - cy, d2 = dx*dx + dy*dy;
-            if (d2 >= r0*r0 && d2 <= r1*r1) px(x, y, c);
-        }
-}
-
-static void draw_disc(int cx, int cy, int r, uint8_t c) { draw_ring(cx, cy, 0, r, c); }
-
-/* thick segment: every pixel within w/2 of the line segment */
 static void draw_seg(float x0, float y0, float x1, float y1, float w, uint8_t c) {
     float hw = w * 0.5f;
     int minx = (int)fminf(x0, x1) - (int)hw - 1, maxx = (int)fmaxf(x0, x1) + (int)hw + 1;
@@ -96,21 +113,21 @@ static void draw_seg(float x0, float y0, float x1, float y1, float w, uint8_t c)
         }
 }
 
-/* ---- 5x7 bitmap font: digits + M, P, H ---- */
+/* ---- 5x7 font (digits only used on this face) ---- */
 static const uint8_t FONT[13][7] = {
-    {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E},  /* 0 */
-    {0x04,0x0C,0x04,0x04,0x04,0x04,0x0E},  /* 1 */
-    {0x0E,0x11,0x01,0x02,0x04,0x08,0x1F},  /* 2 */
-    {0x1F,0x02,0x04,0x02,0x01,0x11,0x0E},  /* 3 */
-    {0x02,0x06,0x0A,0x12,0x1F,0x02,0x02},  /* 4 */
-    {0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E},  /* 5 */
-    {0x06,0x08,0x10,0x1E,0x11,0x11,0x0E},  /* 6 */
-    {0x1F,0x01,0x02,0x04,0x08,0x08,0x08},  /* 7 */
-    {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},  /* 8 */
-    {0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},  /* 9 */
-    {0x11,0x1B,0x15,0x15,0x11,0x11,0x11},  /* M */
-    {0x1E,0x11,0x11,0x1E,0x10,0x10,0x10},  /* P */
-    {0x11,0x11,0x11,0x1F,0x11,0x11,0x11},  /* H */
+    {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E},
+    {0x04,0x0C,0x04,0x04,0x04,0x04,0x0E},
+    {0x0E,0x11,0x01,0x02,0x04,0x08,0x1F},
+    {0x1F,0x02,0x04,0x02,0x01,0x11,0x0E},
+    {0x02,0x06,0x0A,0x12,0x1F,0x02,0x02},
+    {0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E},
+    {0x06,0x08,0x10,0x1E,0x11,0x11,0x0E},
+    {0x1F,0x01,0x02,0x04,0x08,0x08,0x08},
+    {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},
+    {0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},
+    {0x11,0x1B,0x15,0x15,0x11,0x11,0x11},
+    {0x1E,0x11,0x11,0x1E,0x10,0x10,0x10},
+    {0x11,0x11,0x11,0x1F,0x11,0x11,0x11},
 };
 
 static int glyph_index(char ch) {
@@ -123,7 +140,7 @@ static int glyph_index(char ch) {
 
 static int text_width(const char *s, int scale) {
     int n = 0; while (s[n]) n++;
-    return n * 5 * scale + (n - 1) * scale;   /* 1-column gap between glyphs */
+    return n * 5 * scale + (n - 1) * scale;
 }
 
 static void draw_text_center(int cx, int cy, const char *s, int scale, uint8_t c) {
@@ -140,75 +157,156 @@ static void draw_text_center(int cx, int cy, const char *s, int scale, uint8_t c
     }
 }
 
-/* screen-space angle (radians, y down) for a speed value */
+/* rotated text: glyphs swept along the arc, tops pointing at the hub —
+ * rasterized by inverse-sampling so there are no holes */
+static void draw_text_rotated(float cx, float cy, const char *s, int scale, float rot, uint8_t c) {
+    int n = 0; while (s[n]) n++;
+    float tw = (float)(n * 5 * scale + (n - 1) * scale), th = 7.0f * scale;
+    float cr = cosf(rot), sr = sinf(rot);
+    int ext = (int)(sqrtf(tw*tw + th*th) / 2.0f) + 2;
+    for (int oy = -ext; oy <= ext; oy++)
+        for (int ox = -ext; ox <= ext; ox++) {
+            /* map output offset back into unrotated text space */
+            float ux =  ox*cr + oy*sr + tw/2.0f;
+            float uy = -ox*sr + oy*cr + th/2.0f;
+            if (ux < 0 || uy < 0 || ux >= tw || uy >= th) continue;
+            int gi6 = (int)(ux / (6*scale));
+            float gx = ux - gi6 * 6.0f * scale;
+            if (gx >= 5.0f * scale) continue;      /* inter-glyph gap */
+            int gidx = glyph_index(s[gi6]);
+            if (gidx < 0) continue;
+            int col = (int)(gx / scale), row = (int)(uy / scale);
+            if (row > 6) continue;
+            if (FONT[gidx][row] & (0x10 >> col))
+                px((int)(cx + ox), (int)(cy + oy), c);
+        }
+}
+
 static float mph_angle(float mph) {
     return (SWEEP_START_DEG + SWEEP_DEG * (mph / MPH_MAX)) * (3.14159265f / 180.0f);
 }
 
+/* ---- the face ---- */
 void Gauge_RenderFace(uint8_t *fb, int w, int h) {
     FB = fb; W = w; H = h;
     undo_n = 0; recording = 0;
-    const int cx = w / 2, cy = h / 2;
+    const float cx = w / 2.0f, cy = h / 2.0f;
 
-    /* face + bezel, back to front */
-    for (int i = 0; i < w * h; i++) fb[i] = C_BLACK;
-    draw_disc(cx, cy, 359, C_CHROME);          /* outer chrome bezel      */
-    draw_ring(cx, cy, 347, 352, C_DIM);        /* machined bezel groove   */
-    draw_disc(cx, cy, 340, C_SHADOW);          /* bezel-to-face step      */
-    draw_disc(cx, cy, 334, C_FACE);            /* dial face               */
-    draw_ring(cx, cy, 330, 333, C_DIM);        /* thin face edge ring     */
+    /* base shading pass: bezel, band, spun dome, hub — per pixel */
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            float dx = x - cx, dy = y - cy;
+            float r = sqrtf(dx*dx + dy*dy);
+            uint8_t c;
+            if (r > 359.0f)      c = C_BLACK;
+            else if (r > 339.0f) {                       /* chrome bezel */
+                float t = 1.0f - fabsf((r - 349.5f) / 10.0f);  /* crown */
+                t *= 0.75f + 0.25f * (-dy / (r + 1.0f));       /* lit from top */
+                int i = (int)(t * 4.99f);
+                c = BEZEL_RAMP[i < 0 ? 0 : (i > 4 ? 4 : i)];
+            }
+            else if (r > 334.0f) c = C_SEAM;             /* bezel-band seam  */
+            else if (r > 226.0f) {                       /* markings band    */
+                c = (r > 326.0f) ? C_BAND_DK : C_BAND;
+            }
+            else if (r > 218.0f) c = C_DOME_RIM;         /* dome edge ring   */
+            else if (r > 42.0f) {                        /* spun dome        */
+                float a = atan2f(dy, dx);
+                /* anisotropic spun-metal lobes + concentric brushing */
+                float lobe = 0.72f + 0.28f * fabsf(cosf(a + 1.9f));
+                float ring = 0.975f + 0.025f * sinf(r * 0.9f);
+                float streak = 1.0f + 0.030f * sinf(a * 141.0f) * (0.3f + 0.7f * r / 218.0f);
+                float edge = 1.05f - 0.30f * (r / 218.0f) * (r / 218.0f);
+                float t = lobe * ring * streak * edge;
+                int i = (int)(t * 11.99f);
+                c = DOME_RAMP[i < 0 ? 0 : (i > 11 ? 11 : i)];
+            }
+            else if (r > 36.0f)  c = C_SEAM;             /* hub seat         */
+            else {                                       /* chrome hub ball  */
+                float d = sqrtf((dx + 10)*(dx + 10) + (dy + 12)*(dy + 12));
+                c = d < 16.0f ? C_HUB_HI : (d < 30.0f ? C_HUB_MID : C_HUB_LO);
+            }
+            fb[y * w + x] = c;
+        }
 
-    /* ticks: minors every 5 MPH, majors every 10 */
-    for (int v = 0; v <= (int)MPH_MAX; v += 5) {
+    /* ticks at the band's outer edge (as on the reference), minors every
+     * 2 MPH, majors every 10, plus the little square dots inboard */
+    for (int v = 0; v <= (int)MPH_MAX; v += 2) {
         float a = mph_angle((float)v), ca = cosf(a), sa = sinf(a);
         int major = (v % 10) == 0;
-        float r0 = major ? 288.0f : 306.0f, r1 = 326.0f;
-        float wd = major ? 7.0f : 3.0f;
-        draw_seg(cx + ca*r0, cy + sa*r0, cx + ca*r1, cy + sa*r1, wd, C_CREAM);
+        float r0 = major ? 302.0f : 308.0f, r1 = major ? 330.0f : 324.0f;
+        float wd = major ? 5.0f : 2.0f;
+        draw_seg(cx + ca*r0, cy + sa*r0, cx + ca*r1, cy + sa*r1, wd,
+                 major ? C_CREAM_HI : C_CREAM);
     }
+    for (int v = 3; v < (int)MPH_MAX; v += 10)      /* square dots at +3/+7 */
+        for (int d = 0; d < 2; d++) {
+            float a = mph_angle((float)(v + d*4));
+            int sx = (int)(cx + cosf(a)*288.0f), sy = (int)(cy + sinf(a)*288.0f);
+            for (int yy = -3; yy <= 3; yy++)
+                for (int xx = -3; xx <= 3; xx++) px(sx+xx, sy+yy, C_CREAM);
+        }
 
-    /* numerals every 20 MPH, upright, inside the ticks */
-    for (int v = 0; v <= (int)MPH_MAX; v += 20) {
+    /* numerals 0..100, rotated so tops face the hub */
+    for (int v = 0; v <= (int)MPH_MAX; v += 10) {
         float a = mph_angle((float)v);
         char label[4]; int n = 0;
-        if (v >= 100) label[n++] = (char)('0' + v / 100);
+        if (v >= 100) label[n++] = '1';
         if (v >= 10)  label[n++] = (char)('0' + (v / 10) % 10);
-        label[n++] = (char)('0' + v % 10);
-        label[n] = 0;
-        draw_text_center(cx + (int)(cosf(a) * 240.0f),
-                         cy + (int)(sinf(a) * 240.0f), label, 4, C_CREAM);
+        label[n++] = '0'; label[n] = 0;
+        if (v == 0) { label[0] = '0'; label[1] = 0; }
+        draw_text_rotated(cx + cosf(a) * 258.0f, cy + sinf(a) * 258.0f,
+                          label, 3, a + 3.14159265f / 2.0f, C_CREAM_HI);
     }
 
-    draw_text_center(cx, cy + 96, "MPH", 3, C_DIM);
+    /* odometer drum window below the hub, frozen at the photo's mileage */
+    {
+        const int ox0 = 285, oy0 = 452, cw = 30, ch2 = 44, ncell = 5;
+        const char *digits = "47914";
+        int ox1 = ox0 + ncell * cw, oy1 = oy0 + ch2;
+        for (int y = oy0 - 4; y < oy1 + 4; y++)          /* chrome frame */
+            for (int x = ox0 - 4; x < ox1 + 4; x++)
+                px(x, y, C_ODO_FRM);
+        for (int y = oy0 - 2; y < oy1 + 2; y++)          /* recess */
+            for (int x = ox0 - 2; x < ox1 + 2; x++)
+                px(x, y, C_ODO_BG);
+        for (int i = 0; i < ncell; i++) {
+            for (int y = oy0; y < oy1; y++)              /* amber-lit drum */
+                for (int x = ox0 + i*cw + 1; x < ox0 + (i+1)*cw - 1; x++)
+                    px(x, y, C_ODO_CELL);
+            char d[2] = { digits[i], 0 };
+            draw_text_center(ox0 + i*cw + cw/2, oy0 + ch2/2, d, 4, C_ODO_DIG);
+        }
+    }
 
-    /* hub — static: the needle is drawn strictly outside it (r >= 36 both
-     * directions), so moving the needle never requires repainting the hub */
-    draw_disc(cx, cy, 34, C_GRAY);
-    draw_ring(cx, cy, 28, 33, C_SHADOW);
-    draw_disc(cx, cy, 12, C_CHROME);
+    /* unlit turn arrows flanking the top, as on the cluster panel */
+    for (int side = 0; side < 2; side++) {
+        int dir = side ? 1 : -1;                 /* -1 left, +1 right */
+        int ax = (int)cx + dir * 196, ay = 104;  /* outward-pointing tip */
+        for (int i = 0; i < 26; i++)             /* widens toward center */
+            for (int j = -i * 2 / 3; j <= i * 2 / 3; j++)
+                px(ax - dir * i, ay + j, C_ARROW);
+    }
 }
 
+/* ---- host-preview needle (firmware uses the sprite path below) ---- */
 void Gauge_SetNeedle(float mph, uint32_t *dirty_first, uint32_t *dirty_last) {
     const int cx = W / 2, cy = H / 2;
     dirty_lo = UINT32_MAX; dirty_hi = 0;
-
-    /* restore the face under the previous needle, in reverse write order */
     while (undo_n > 0) {
         undo_n--;
         FB[undo_off[undo_n]] = undo_val[undo_n];
         mark_dirty(undo_off[undo_n]);
     }
-
-    /* draw the new needle, logging every overwritten pixel */
     recording = 1;
     {
         float a = mph_angle(mph), ca = cosf(a), sa = sinf(a);
-        draw_seg(cx - ca*46.0f, cy - sa*46.0f, cx - ca*36.0f, cy - sa*36.0f, 8.0f, C_RED);
-        draw_seg(cx + ca*38.0f, cy + sa*38.0f, cx + ca*170.0f, cy + sa*170.0f, 10.0f, C_RED);
-        draw_seg(cx + ca*170.0f, cy + sa*170.0f, cx + ca*282.0f, cy + sa*282.0f, 5.0f, C_RED);
+        draw_seg(cx + ca*37.0f, cy + sa*37.0f, cx + ca*170.0f, cy + sa*170.0f, 9.0f, SPN_EDGE);
+        draw_seg(cx + ca*170.0f, cy + sa*170.0f, cx + ca*276.0f, cy + sa*276.0f, 4.5f, SPN_EDGE);
+        draw_seg(cx + ca*38.0f, cy + sa*38.0f, cx + ca*170.0f, cy + sa*170.0f, 6.2f, SPN_CORE);
+        draw_seg(cx + ca*170.0f, cy + sa*170.0f, cx + ca*272.0f, cy + sa*272.0f, 2.2f, SPN_CORE);
     }
     recording = 0;
-
     if (dirty_first) *dirty_first = (dirty_lo == UINT32_MAX) ? 0 : dirty_lo;
     if (dirty_last)  *dirty_last  = dirty_hi;
 }
@@ -220,11 +318,8 @@ void Gauge_RenderSpeedo(uint8_t *fb, int w, int h, float mph) {
 
 /* ---- needle sprite (AL44) for LTDC layer-2 compositing ---- */
 
-#define SPR_OPAQUE_RED ((uint8_t)(0xF0u | C_RED))
-
-/* thick segment into the sprite buffer, coordinates local to the sprite */
 static void sprite_seg(uint8_t *buf, int w, int h,
-                       float x0, float y0, float x1, float y1, float sw) {
+                       float x0, float y0, float x1, float y1, float sw, uint8_t val) {
     float hw = sw * 0.5f;
     int minx = (int)fminf(x0, x1) - (int)hw - 1, maxx = (int)fmaxf(x0, x1) + (int)hw + 1;
     int miny = (int)fminf(y0, y1) - (int)hw - 1, maxy = (int)fmaxf(y0, y1) + (int)hw + 1;
@@ -238,7 +333,7 @@ static void sprite_seg(uint8_t *buf, int w, int h,
             float t = len2 > 0 ? ((x - x0)*vx + (y - y0)*vy) / len2 : 0;
             t = t < 0 ? 0 : (t > 1 ? 1 : t);
             float dx = x - (x0 + t*vx), dy = y - (y0 + t*vy);
-            if (dx*dx + dy*dy <= hw*hw) buf[y * GAUGE_SPR_PITCH + x] = SPR_OPAQUE_RED;
+            if (dx*dx + dy*dy <= hw*hw) buf[y * GAUGE_SPR_PITCH + x] = val;
         }
 }
 
@@ -246,8 +341,8 @@ void Gauge_DrawNeedleSprite(uint8_t *buf, float mph,
                             int *out_x, int *out_y, int *out_w, int *out_h) {
     float a = mph_angle(mph), ca = cosf(a), sa = sinf(a);
 
-    /* needle extents along its axis: tail reaches -50, tip +287 (widths incl.) */
-    float ex0 = -50.0f, ex1 = 287.0f;
+    /* lance from just outside the hub (40) to inside the ticks (276) */
+    float ex0 = 36.0f, ex1 = 280.0f;
     int minx = (int)floorf(fminf(ex0*ca, ex1*ca)) - 7;
     int maxx = (int)ceilf (fmaxf(ex0*ca, ex1*ca)) + 7;
     int miny = (int)floorf(fminf(ex0*sa, ex1*sa)) - 7;
@@ -256,15 +351,15 @@ void Gauge_DrawNeedleSprite(uint8_t *buf, float mph,
     if (w > GAUGE_SPR_MAX) w = GAUGE_SPR_MAX;
     if (h > GAUGE_SPR_MAX) h = GAUGE_SPR_MAX;
 
-    /* clear exactly the region the LTDC window will scan */
     for (int r = 0; r < h; r++)
         for (int c = 0; c < w; c++) buf[r * GAUGE_SPR_PITCH + c] = 0;
 
-    /* segments in sprite-local coordinates */
     float ox = (float)-minx, oy = (float)-miny;
-    sprite_seg(buf, w, h, ox - 46.0f*ca, oy - 46.0f*sa, ox - 36.0f*ca, oy - 36.0f*sa,  8.0f);
-    sprite_seg(buf, w, h, ox + 38.0f*ca, oy + 38.0f*sa, ox + 170.0f*ca, oy + 170.0f*sa, 10.0f);
-    sprite_seg(buf, w, h, ox + 170.0f*ca, oy + 170.0f*sa, ox + 282.0f*ca, oy + 282.0f*sa, 5.0f);
+    /* dark edge first, bright orange core over it */
+    sprite_seg(buf, w, h, ox + 37.0f*ca, oy + 37.0f*sa, ox + 170.0f*ca, oy + 170.0f*sa, 9.0f, 0xF0 | SPN_EDGE);
+    sprite_seg(buf, w, h, ox + 170.0f*ca, oy + 170.0f*sa, ox + 276.0f*ca, oy + 276.0f*sa, 4.5f, 0xF0 | SPN_EDGE);
+    sprite_seg(buf, w, h, ox + 38.0f*ca, oy + 38.0f*sa, ox + 170.0f*ca, oy + 170.0f*sa, 6.2f, 0xF0 | SPN_CORE);
+    sprite_seg(buf, w, h, ox + 170.0f*ca, oy + 170.0f*sa, ox + 272.0f*ca, oy + 272.0f*sa, 2.2f, 0xF0 | SPN_CORE);
 
     *out_x = W / 2 + minx;
     *out_y = H / 2 + miny;

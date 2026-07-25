@@ -279,13 +279,13 @@ void NV3052C_Update(void)
     float target;
     if (now < 3000U) {                      /* ignition sweep, up then back */
         float t = (float)now / 1500.0f;     /* 0..2 */
-        target = (t < 1.0f ? t : 2.0f - t) * 120.0f;
+        target = (t < 1.0f ? t : 2.0f - t) * 100.0f;
     } else {                                /* cruise: two layered sines */
         float t = (float)now / 1000.0f;
         target = 55.0f + 22.0f * sinf(t * 0.6f) + 9.0f * sinf(t * 1.7f + 1.3f);
     }
     if (target < 0.0f)   target = 0.0f;
-    if (target > 120.0f) target = 120.0f;
+    if (target > 100.0f) target = 100.0f;
 
     shown += (target - shown) * 0.15f;      /* needle damping */
 

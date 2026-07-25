@@ -48,16 +48,19 @@ def read_words(cli, addr, n):
     return words[:n]
 
 def parse_clut():
-    src = open(os.path.join(REPO, "Display", "gauge.c")).read()
-    clut = [0] * 256
-    body = re.search(r"Gauge_CLUT\[256\]\s*=\s*\{(.*?)\};", src, re.S).group(1)
-    names = dict(re.findall(r"(C_\w+)\s*=\s*(\d+)", src))
-    for name, val in re.findall(r"\[(C_\w+)\]\s*=\s*0x([0-9A-Fa-f]{6})", body):
-        clut[int(names[name])] = int(val, 16)
-    for i in range(1, 16):              # mirror at {i,i} like the firmware table
-        if clut[i] and not clut[i * 17]:
-            clut[i * 17] = clut[i]
-    return clut
+    """Compile gauge.c on the host and dump Gauge_CLUT — always in sync
+    with the firmware, immune to source-formatting changes."""
+    tmp = tempfile.mkdtemp()
+    main_c = os.path.join(tmp, "clutdump.c")
+    exe = os.path.join(tmp, "clutdump")
+    open(main_c, "w").write(
+        '#include <stdio.h>\n#include "gauge.h"\n'
+        'int main(void){for(int i=0;i<256;i++)printf("%06X\\n",Gauge_CLUT[i]);return 0;}\n')
+    subprocess.run(["cc", "-I", os.path.join(REPO, "Display"), main_c,
+                    os.path.join(REPO, "Display", "gauge.c"), "-lm", "-o", exe],
+                   check=True, capture_output=True)
+    out = subprocess.run([exe], capture_output=True, text=True).stdout.split()
+    return [int(v, 16) for v in out]
 
 def png_write(path, w, h, rgb):
     def chunk(tag, data):
