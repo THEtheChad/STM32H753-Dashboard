@@ -36,8 +36,35 @@ const uint32_t Gauge_CLUT[256] = {
 static int W, H;
 static uint8_t *FB;
 
+/* Undo log for the needle: every pixel it overwrites is recorded so the
+ * next frame can restore the face without keeping a second framebuffer
+ * (there is no RAM for one). Restores run in reverse so overlapping
+ * writes within one frame unwind correctly. */
+#define UNDO_MAX 6000
+static uint32_t undo_off[UNDO_MAX];
+static uint8_t  undo_val[UNDO_MAX];
+static uint32_t undo_n;
+static int      recording;
+static uint32_t dirty_lo, dirty_hi;
+
+static inline void mark_dirty(uint32_t idx) {
+    if (idx < dirty_lo) dirty_lo = idx;
+    if (idx > dirty_hi) dirty_hi = idx;
+}
+
 static inline void px(int x, int y, uint8_t c) {
-    if ((unsigned)x < (unsigned)W && (unsigned)y < (unsigned)H) FB[y * W + x] = c;
+    if ((unsigned)x < (unsigned)W && (unsigned)y < (unsigned)H) {
+        uint32_t idx = (uint32_t)(y * W + x);
+        if (recording) {
+            if (undo_n < UNDO_MAX) {
+                undo_off[undo_n] = idx;
+                undo_val[undo_n] = FB[idx];
+                undo_n++;
+            }
+            mark_dirty(idx);
+        }
+        FB[idx] = c;
+    }
 }
 
 static void draw_ring(int cx, int cy, int r0, int r1, uint8_t c) {
@@ -114,8 +141,9 @@ static float mph_angle(float mph) {
     return (SWEEP_START_DEG + SWEEP_DEG * (mph / MPH_MAX)) * (3.14159265f / 180.0f);
 }
 
-void Gauge_RenderSpeedo(uint8_t *fb, int w, int h, float mph) {
+void Gauge_RenderFace(uint8_t *fb, int w, int h) {
     FB = fb; W = w; H = h;
+    undo_n = 0; recording = 0;
     const int cx = w / 2, cy = h / 2;
 
     /* face + bezel, back to front */
@@ -149,15 +177,39 @@ void Gauge_RenderSpeedo(uint8_t *fb, int w, int h, float mph) {
 
     draw_text_center(cx, cy + 96, "MPH", 3, C_DIM);
 
-    /* needle: tapered, tail through the hub */
-    {
-        float a = mph_angle(mph), ca = cosf(a), sa = sinf(a);
-        draw_seg(cx - ca*46.0f, cy - sa*46.0f, cx + ca*170.0f, cy + sa*170.0f, 10.0f, C_RED);
-        draw_seg(cx + ca*170.0f, cy + sa*170.0f, cx + ca*282.0f, cy + sa*282.0f, 5.0f, C_RED);
-    }
-
-    /* hub over the needle tail */
+    /* hub — static: the needle is drawn strictly outside it (r >= 36 both
+     * directions), so moving the needle never requires repainting the hub */
     draw_disc(cx, cy, 34, C_GRAY);
     draw_ring(cx, cy, 28, 33, C_SHADOW);
     draw_disc(cx, cy, 12, C_CHROME);
+}
+
+void Gauge_SetNeedle(float mph, uint32_t *dirty_first, uint32_t *dirty_last) {
+    const int cx = W / 2, cy = H / 2;
+    dirty_lo = UINT32_MAX; dirty_hi = 0;
+
+    /* restore the face under the previous needle, in reverse write order */
+    while (undo_n > 0) {
+        undo_n--;
+        FB[undo_off[undo_n]] = undo_val[undo_n];
+        mark_dirty(undo_off[undo_n]);
+    }
+
+    /* draw the new needle, logging every overwritten pixel */
+    recording = 1;
+    {
+        float a = mph_angle(mph), ca = cosf(a), sa = sinf(a);
+        draw_seg(cx - ca*46.0f, cy - sa*46.0f, cx - ca*36.0f, cy - sa*36.0f, 8.0f, C_RED);
+        draw_seg(cx + ca*38.0f, cy + sa*38.0f, cx + ca*170.0f, cy + sa*170.0f, 10.0f, C_RED);
+        draw_seg(cx + ca*170.0f, cy + sa*170.0f, cx + ca*282.0f, cy + sa*282.0f, 5.0f, C_RED);
+    }
+    recording = 0;
+
+    if (dirty_first) *dirty_first = (dirty_lo == UINT32_MAX) ? 0 : dirty_lo;
+    if (dirty_last)  *dirty_last  = dirty_hi;
+}
+
+void Gauge_RenderSpeedo(uint8_t *fb, int w, int h, float mph) {
+    Gauge_RenderFace(fb, w, h);
+    Gauge_SetNeedle(mph, 0, 0);
 }

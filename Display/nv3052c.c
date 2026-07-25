@@ -1,5 +1,6 @@
 #include "nv3052c.h"
 #include "gauge.h"
+#include <math.h>
 
 extern LTDC_HandleTypeDef hltdc;
 
@@ -197,7 +198,8 @@ void NV3052C_Init(void)
      * Guard the clean: cache maintenance by address with the D-cache disabled
      * raises an imprecise BusFault on the M7 (root cause of the 2026-07-25
      * black-screen HardFault). */
-    Gauge_RenderSpeedo(fb, NV3052C_WIDTH, NV3052C_HEIGHT, 55.0f);
+    Gauge_RenderFace(fb, NV3052C_WIDTH, NV3052C_HEIGHT);
+    Gauge_SetNeedle(0.0f, 0, 0);
     if (SCB->CCR & SCB_CCR_DC_Msk)
         SCB_CleanDCache_by_Addr((uint32_t *)fb, FB_BYTES);
 
@@ -226,7 +228,37 @@ void NV3052C_Init(void)
     }
 }
 
-/* Static image for now — real-time needle updates come with sensor data. */
+/* Animate the needle at ~50 FPS: an ignition sweep (0-120-0), then a
+ * simulated cruise until real speed data is wired in. A low-pass filter
+ * gives the needle damped, instrument-like motion. Only the dirty span
+ * of the framebuffer is cache-cleaned each frame. */
 void NV3052C_Update(void)
 {
+    static uint32_t lastFrame = 0;
+    static float    shown     = 0.0f;
+
+    uint32_t now = HAL_GetTick();
+    if (now - lastFrame < 20U) return;
+    lastFrame = now;
+
+    float target;
+    if (now < 3000U) {                      /* ignition sweep, up then back */
+        float t = (float)now / 1500.0f;     /* 0..2 */
+        target = (t < 1.0f ? t : 2.0f - t) * 120.0f;
+    } else {                                /* cruise: two layered sines */
+        float t = (float)now / 1000.0f;
+        target = 55.0f + 22.0f * sinf(t * 0.6f) + 9.0f * sinf(t * 1.7f + 1.3f);
+    }
+    if (target < 0.0f)   target = 0.0f;
+    if (target > 120.0f) target = 120.0f;
+
+    shown += (target - shown) * 0.15f;      /* needle damping */
+
+    uint32_t d0, d1;
+    Gauge_SetNeedle(shown, &d0, &d1);
+    if ((SCB->CCR & SCB_CCR_DC_Msk) && d1 >= d0) {
+        uint32_t base = ((uint32_t)fb + d0) & ~31U;
+        SCB_CleanDCache_by_Addr((uint32_t *)base,
+                                (int32_t)((uint32_t)fb + d1 - base + 1U));
+    }
 }
