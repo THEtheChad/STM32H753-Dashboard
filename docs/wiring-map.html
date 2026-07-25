@@ -358,8 +358,10 @@ function refresh() {
   for (const p of pins.values()) {
     const n = occupancy(p.id);
     p.circle.classList.toggle("occupied", n > 0);
-    p.circle.setAttribute("fill", n > 0 ? "#39424c" : "#11151a");   // lighter fill so dark rings read
-    p.circle.setAttribute("stroke", n > 0 ? connsOf(p.id)[0].color : "#768390");
+    // inline styles, not attributes: SVG presentation attributes lose to the
+    // stylesheet's .pin rules, which left bound pins grey
+    p.circle.style.fill = n > 0 ? "#39424c" : "";                   // lighter fill so dark rings read
+    p.circle.style.stroke = n > 0 ? connsOf(p.id)[0].color : "";
   }
   const list = document.getElementById("connList");
   list.innerHTML = "";
