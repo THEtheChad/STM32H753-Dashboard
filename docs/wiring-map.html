@@ -60,8 +60,8 @@
   .boardlabel { fill: #768390; font-size: 13px; font-weight: 600; }
   .connlabel { fill: #96a4b2; font-size: 9.5px; font-weight: 600; }
   .rowno { fill: #626e7b; font-size: 7.5px; font-family: ui-monospace, monospace; }
-  .pin { fill: #11151a; stroke: #768390; stroke-width: 1; }
-  .pin.occupied { stroke-width: 3.5; }
+  .pin { fill: transparent; stroke: #768390; stroke-width: 1.2; }
+  .pin.occupied { stroke: #cdd9e5; stroke-width: 1.5; }
   .pin.pending { stroke: #fff; stroke-width: 2; }
   .pinhit { fill: transparent; cursor: crosshair; }
   .pin1mark { fill: none; stroke: #96a4b2; stroke-width: 1; }
@@ -358,10 +358,9 @@ function refresh() {
   for (const p of pins.values()) {
     const n = occupancy(p.id);
     p.circle.classList.toggle("occupied", n > 0);
-    // inline styles, not attributes: SVG presentation attributes lose to the
-    // stylesheet's .pin rules, which left bound pins grey
-    p.circle.style.fill = n > 0 ? "#39424c" : "";                   // lighter fill so dark rings read
-    p.circle.style.stroke = n > 0 ? connsOf(p.id)[0].color : "";
+    // inline style, not attribute: presentation attributes lose to .pin CSS.
+    // Empty pin = hollow grey circle; bound pin = filled with its wire color.
+    p.circle.style.fill = n > 0 ? connsOf(p.id)[0].color : "";
   }
   const list = document.getElementById("connList");
   list.innerHTML = "";
