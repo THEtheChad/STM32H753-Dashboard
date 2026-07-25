@@ -61,13 +61,14 @@
   .connlabel { fill: #96a4b2; font-size: 9.5px; font-weight: 600; }
   .rowno { fill: #626e7b; font-size: 7.5px; font-family: ui-monospace, monospace; }
   .pin { fill: #11151a; stroke: #768390; stroke-width: 1; }
-  .pin.occupied { stroke-width: 2; }
+  .pin.occupied { stroke-width: 3.5; }
   .pin.pending { stroke: #fff; stroke-width: 2; }
   .pinhit { fill: transparent; cursor: crosshair; }
   .pin1mark { fill: none; stroke: #96a4b2; stroke-width: 1; }
-  .wire { fill: none; stroke-linecap: round; }
-  .wirehit { fill: none; stroke: transparent; stroke-width: 9; cursor: pointer; }
+  .wire { fill: none; stroke-linecap: round; display: none; pointer-events: none; }
+  .wire.show, .wire.sel { display: inline; }
   .wire.sel { filter: drop-shadow(0 0 3px #fff); }
+  .hover-ring { fill: none; stroke: #fff; stroke-width: 1.5; pointer-events: none; }
   @keyframes pulse { 50% { r: 8; } }
   .pending-ring { fill: none; stroke: #fff; stroke-width: 1.5; animation: pulse 0.9s infinite; }
 </style>
@@ -75,7 +76,7 @@
 <body>
 <div id="sidebar">
   <h1>Bench Wiring Recorder</h1>
-  <div class="sub">Click a pin, then a second pin, to record one jumper. Esc cancels. Scroll to zoom, drag background to pan.</div>
+  <div class="sub">Click a pin, then a second pin, to record one jumper. Bound pins wear their wire's color — hover one to see the wire and its far end, click it to select. Esc cancels. Scroll to zoom, drag to pan. Outer numbers count <b>rows from the top</b> of each connector (row 4 = pins 7/8).</div>
 
   <div class="section">
     <h2>Wire color</h2>
@@ -186,8 +187,11 @@ for (let n = 1; n <= 40; n++) {
 function pinTitle(p) {
   if (p.conn === "GNDL" || p.conn === "GNDR")
     return `GND stake ${p.pin} below ${p.conn === "GNDL" ? "CN11" : "CN12"}`;
-  if (p.board === "NUCLEO") return `${p.conn} pin ${p.pin}` + (p.label ? ` — ${p.label}` : "");
-  if (p.board === "FPC40")  return `FPC-40P pin ${p.pin}`;
+  const row = Math.ceil(p.pin / 2), side = p.pin % 2 ? "left" : "right";
+  if (p.board === "NUCLEO")
+    return `${p.conn} pin ${p.pin} (row ${row}, ${side})` + (p.label ? ` — ${p.label}` : "");
+  if (p.board === "FPC40")
+    return `FPC-40P pin ${p.pin} (col ${row}, ${p.pin % 2 ? "top" : "bottom"} row)`;
   return `DC-DC ${p.pin}`;
 }
 function pinShort(p) {
@@ -210,7 +214,7 @@ function applyView() { svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w
 applyView();
 
 const layers = {};
-["boards","wires","wirehits","pins","overlay"].forEach(n => layers[n] = el("g", {}, svg));
+["boards","wires","pins","overlay"].forEach(n => layers[n] = el("g", {}, svg));
 
 // board outlines
 el("rect", { x:40,  y:120, width:560, height:700, rx:10, class:"board blue" }, layers.boards);
@@ -231,19 +235,45 @@ for (const p of pins.values()) {
   p.circle = el("circle", { cx:p.x, cy:p.y, r:5.5, class:"pin" }, layers.pins);
   const hit = el("circle", { cx:p.x, cy:p.y, r:9, class:"pinhit" }, layers.pins);
   hit.addEventListener("click", ev => { ev.stopPropagation(); clickPin(p); });
-  hit.addEventListener("mousemove", ev => showTip(ev, pinTitle(p)));
-  hit.addEventListener("mouseleave", hideTip);
+  hit.addEventListener("mouseenter", () => hoverPin(p));
+  hit.addEventListener("mousemove", ev => showTip(ev, hoverText(p)));
+  hit.addEventListener("mouseleave", () => { unhoverPin(); hideTip(); });
   if ((p.board === "NUCLEO" || p.board === "FPC40") && p.pin === 1)
     el("rect", { x:p.x-8.5, y:p.y-8.5, width:17, height:17, class:"pin1mark" }, layers.pins);
 }
-for (const conn in ROWS) {                       // odd-pin guides every 5 rows
+for (const conn in ROWS) {                       // row-count guides: rows 1, 5, 10, ...
   ROWS[conn].forEach((_, i) => {
-    if (i % 5 === 0) {
+    const r = i + 1;
+    if (r === 1 || r % 5 === 0) {
       const p = pins.get(`NUCLEO:${conn}:${2*i+1}`);
       const t = el("text", { x:p.x-22, y:p.y+2.5, class:"rowno" }, layers.pins);
-      t.textContent = 2*i+1;
+      t.textContent = r;
     }
   });
+}
+
+/* hover: reveal this pin's wire(s), halo the partner pin(s) */
+let hoverRings = [], hoveredConns = [];
+function connsOf(pinId) { return conns.filter(c => c.a === pinId || c.b === pinId); }
+function hoverPin(p) {
+  unhoverPin();
+  for (const c of connsOf(p.id)) {
+    c.path.classList.add("show");
+    hoveredConns.push(c);
+    const other = pins.get(c.a === p.id ? c.b : c.a);
+    hoverRings.push(el("circle", { cx:other.x, cy:other.y, r:9, class:"hover-ring" }, layers.overlay));
+  }
+}
+function unhoverPin() {
+  hoveredConns.forEach(c => c.path.classList.remove("show"));
+  hoverRings.forEach(r => r.remove());
+  hoveredConns = []; hoverRings = [];
+}
+function hoverText(p) {
+  const cs = connsOf(p.id);
+  const suffix = cs.map(c =>
+    ` · wired to ${pinShort(pins.get(c.a === p.id ? c.b : c.a))} (${c.colorName})`).join("");
+  return pinTitle(p) + suffix;
 }
 for (let n = 1; n <= 39; n += 4) {               // FPC odd-row guides
   const p = pins.get(`FPC40:J1:${n}`);
@@ -261,13 +291,15 @@ function occupancy(pinId) { return conns.filter(c => c.a === pinId || c.b === pi
 function clickPin(p) {
   if (selectedConn) selectConn(null);
   if (pending === p.id) { cancelPending(); return; }
-  if (occupancy(p.id) >= p.cap) { toast(`${pinShort(p)} already has ${p.cap === 1 ? "a wire" : "two wires"}`); return; }
+  const occ = occupancy(p.id);
   if (!pending) {
+    if (occ >= p.cap) { selectConn(connsOf(p.id)[0]); return; }   // full pin: select its wire
     pending = p.id;
     pendingRing = el("circle", { cx:p.x, cy:p.y, r:8, class:"pending-ring" }, layers.overlay);
     p.circle.classList.add("pending");
     setStatus(`<b>${pinTitle(p)}</b> selected — click the wire's other end`);
   } else {
+    if (occ >= p.cap) { toast(`${pinShort(p)} already has ${p.cap === 1 ? "a wire" : "two wires"}`); return; }
     const a = pending; cancelPending();
     addConn(a, p.id, currentColor, currentColorName);
   }
@@ -294,16 +326,12 @@ function drawConn(c) {
   const mx = (A.x + B.x) / 2, my = Math.max(A.y, B.y) + sag;
   const d = `M ${A.x} ${A.y} Q ${mx} ${my} ${B.x} ${B.y}`;
   c.path = el("path", { d, class:"wire", stroke:c.color, "stroke-width":3 }, layers.wires);
-  c.hit  = el("path", { d, class:"wirehit" }, layers.wirehits);
-  c.hit.addEventListener("click", ev => { ev.stopPropagation(); selectConn(c); });
-  c.hit.addEventListener("mousemove", ev =>
-    showTip(ev, `${pinShort(A)} ⇄ ${pinShort(B)} (${c.colorName})`));
-  c.hit.addEventListener("mouseleave", hideTip);
 }
 function removeConn(c) {
-  c.path.remove(); c.hit.remove();
+  c.path.remove();
   conns = conns.filter(x => x !== c);
   if (selectedConn === c) selectedConn = null;
+  unhoverPin();
   refresh(); save();
 }
 function selectConn(c) {
@@ -330,8 +358,8 @@ function refresh() {
   for (const p of pins.values()) {
     const n = occupancy(p.id);
     p.circle.classList.toggle("occupied", n > 0);
-    p.circle.setAttribute("fill", n > 0 ? conns.find(c => c.a === p.id || c.b === p.id).color : "#11151a");
-    p.circle.setAttribute("stroke", n > 0 ? "#e6edf3" : "#768390");
+    p.circle.setAttribute("fill", n > 0 ? "#39424c" : "#11151a");   // lighter fill so dark rings read
+    p.circle.setAttribute("stroke", n > 0 ? connsOf(p.id)[0].color : "#768390");
   }
   const list = document.getElementById("connList");
   list.innerHTML = "";
