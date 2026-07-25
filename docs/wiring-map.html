@@ -167,6 +167,12 @@ buildDual("CN7",  445, 200, ZP);   // Zio right, top
 buildDual("CN10", 445, 392, ZP);   // Zio right, bottom
 buildDual("CN12", 545, 200, MP);   // morpho right edge
 
+// GND stakes: two pins below each morpho header on Nucleo-144 boards
+[["GNDL","CN11",80],["GNDR","CN12",545]].forEach(([conn, under, x]) => {
+  addPin(`NUCLEO:${conn}:1`, x,      788, "NUCLEO", conn, 1, "GND");
+  addPin(`NUCLEO:${conn}:2`, x + MP, 788, "NUCLEO", conn, 2, "GND");
+});
+
 // FPC-40P breakout: 2×20 staggered header, odds top row (as silkscreened)
 for (let n = 1; n <= 40; n++) {
   const col = Math.ceil(n / 2) - 1;
@@ -178,6 +184,8 @@ for (let n = 1; n <= 40; n++) {
   .forEach(([p,x,y]) => addPin(`DCDC:U1:${p}`, x, y, "DCDC", "U1", p, null, 2));
 
 function pinTitle(p) {
+  if (p.conn === "GNDL" || p.conn === "GNDR")
+    return `GND stake ${p.pin} below ${p.conn === "GNDL" ? "CN11" : "CN12"}`;
   if (p.board === "NUCLEO") return `${p.conn} pin ${p.pin}` + (p.label ? ` — ${p.label}` : "");
   if (p.board === "FPC40")  return `FPC-40P pin ${p.pin}`;
   return `DC-DC ${p.pin}`;
@@ -214,6 +222,7 @@ bl("FPC-40P breakout", 760, 175);
 bl("DC-DC module", 790, 545);
 [["CN11",72,190],["CN8",162,190],["CN9",162,346],["CN7",437,190],["CN10",437,382],["CN12",537,190],
  ["J1 — odd row nearest FPC connector",760, 260],
+ ["GND",70,812],["GND",535,812],
  ["IN+",848,564],["IN−",848,629],["OUT+",950,564],["OUT−",950,629]]
   .forEach(([t,x,y]) => { const e = el("text",{x,y,class:"connlabel"},layers.boards); e.textContent = t; });
 
