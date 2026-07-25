@@ -115,6 +115,27 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+  /* Framebuffer RAM (AXI SRAM) as write-through: CPU writes reach RAM
+   * immediately and in order, so LTDC scanout never sees stale or
+   * half-flushed pixels and no per-frame cache maintenance is needed.
+   * With write-back this raced the scanline and tore the moving needle.
+   * Region 0 (background) is CubeMX-generated; this stacks region 1. */
+  {
+    MPU_Region_InitTypeDef r = {0};
+    HAL_MPU_Disable();
+    r.Enable           = MPU_REGION_ENABLE;
+    r.Number           = MPU_REGION_NUMBER1;
+    r.BaseAddress      = 0x24000000U;
+    r.Size             = MPU_REGION_SIZE_512KB;
+    r.TypeExtField     = MPU_TEX_LEVEL0;          /* TEX=0, C=1, B=0 = write-through */
+    r.AccessPermission = MPU_REGION_FULL_ACCESS;
+    r.DisableExec      = MPU_INSTRUCTION_ACCESS_DISABLE;
+    r.IsShareable      = MPU_ACCESS_NOT_SHAREABLE;
+    r.IsCacheable      = MPU_ACCESS_CACHEABLE;
+    r.IsBufferable     = MPU_ACCESS_NOT_BUFFERABLE;
+    HAL_MPU_ConfigRegion(&r);
+    HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+  }
   /* CPU caches were never enabled; the Cortex-M7 is crippled without them and
    * cache-maintenance ops (used for LTDC framebuffer coherence) hard-fault if
    * executed while the D-cache is off. MPU_Config() has already run. */

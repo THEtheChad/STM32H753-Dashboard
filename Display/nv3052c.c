@@ -268,11 +268,9 @@ void NV3052C_Update(void)
 
     shown += (target - shown) * 0.15f;      /* needle damping */
 
-    uint32_t d0, d1;
-    Gauge_SetNeedle(shown, &d0, &d1);
-    if ((SCB->CCR & SCB_CCR_DC_Msk) && d1 >= d0) {
-        uint32_t base = ((uint32_t)fb + d0) & ~31U;
-        SCB_CleanDCache_by_Addr((uint32_t *)base,
-                                (int32_t)((uint32_t)fb + d1 - base + 1U));
-    }
+    /* No cache clean here: the framebuffer region is write-through (MPU
+     * region 1), so these writes are already in RAM. With write-back this
+     * needed a span clean that could outlast the blanking window — the
+     * source of the residual tearing. */
+    Gauge_SetNeedle(shown, 0, 0);
 }
