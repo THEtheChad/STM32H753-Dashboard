@@ -1,14 +1,15 @@
 #include "nv3052c.h"
+#include "gauge.h"
 
 extern LTDC_HandleTypeDef hltdc;
 
-/* Real framebuffer at fixed address in AXI SRAM (RAM_D1, 512 KB total).
+/* L8 (palettized) framebuffer at a fixed address in AXI SRAM (RAM_D1, 512 KB).
  * Linker .bss lives in DTCMRAM (0x20000000) which is CPU-private — LTDC, an AXI
  * master, cannot read it. A pointer to 0x24000000 sidesteps the linker entirely.
- * RAM_D1 is otherwise unused (build report shows RAM: 0/512 KB). */
-#define FB_HEIGHT  128
-#define FB_BYTES   (NV3052C_WIDTH * FB_HEIGHT * 2U)
-static uint16_t * const fb = (uint16_t *)0x24000000U;
+ * 720*720*1 byte = 506.25 KB of the 512 KB bank; a full RGB565 buffer (1013 KB)
+ * would not fit in any single bank, which is why the layer runs L8 + CLUT. */
+#define FB_BYTES   (NV3052C_WIDTH * NV3052C_HEIGHT)
+static uint8_t * const fb = (uint8_t *)0x24000000U;
 
 /* -------------------------------------------------------------------------
  * Bit-bang 9-bit SPI
@@ -159,38 +160,6 @@ static const nv_reg_t nv_init[] = {
  * Public API
  * -------------------------------------------------------------------------*/
 
-void NV3052C_SetColor(uint16_t color_rgb565)
-{
-    for (int i = 0; i < NV3052C_WIDTH * FB_HEIGHT; i++)
-        fb[i] = color_rgb565;
-    SCB_CleanDCache_by_Addr((uint32_t*)fb, FB_BYTES);
-}
-
-/* Fill framebuffer with 8 vertical color bars, each 90 px wide.
- * If the panel is working, all 8 bars span the screen left-to-right at full width.
- * If we still only see 2 columns, the limitation is panel-side, not LTDC. */
-static void fill_color_bars(void)
-{
-    /* 8 bars × 90 px = 720 px. Bar order chosen to be obvious under MADCTL BGR swap:
-     * panel sees R↔B swapped, so RGB565 RED (0xF800) appears blue, BLUE (0x001F) appears red. */
-    static const uint16_t bar[] = {
-        0xF800,  /* "red"   → blue on panel */
-        0x07E0,  /* green   → green */
-        0x001F,  /* "blue"  → red on panel */
-        0xFFE0,  /* yellow  → cyan on panel */
-        0x07FF,  /* cyan    → yellow on panel */
-        0xF81F,  /* magenta → magenta */
-        0xFFFF,  /* white   → white */
-        0x0000   /* black */
-    };
-    for (int y = 0; y < FB_HEIGHT; y++) {
-        for (int x = 0; x < NV3052C_WIDTH; x++) {
-            fb[y * NV3052C_WIDTH + x] = bar[(x / 90) & 7];
-        }
-    }
-    SCB_CleanDCache_by_Addr((uint32_t*)fb, FB_BYTES);
-}
-
 void NV3052C_Init(void)
 {
     /* Stop LTDC — NV3052C ignores SPI while PCLK is running */
@@ -224,33 +193,36 @@ void NV3052C_Init(void)
     nv_reg(0x29, 0x00);   /* Display On */
     HAL_Delay(100);
 
-    /* fill_color_bars() intentionally NOT called here — BCCR-only diagnostic
-     * does not need the framebuffer. If touching 0x24000000 is the source of
-     * the HardFault (e.g., AXI SRAM access blocked by MPU), skipping it
-     * isolates the problem. */
+    /* Render the static gauge face, then hand the framebuffer to the LTDC. */
+    Gauge_RenderSpeedo(fb, NV3052C_WIDTH, NV3052C_HEIGHT, 55.0f);
+    SCB_CleanDCache_by_Addr((uint32_t *)fb, FB_BYTES);
 
     ltdc_clk_restore();
     __HAL_LTDC_ENABLE(&hltdc);
+    hltdc.Instance->BCCR = 0x00000000U;
 
-    /* Step-1 diagnostic: layer fully OFF, BCCR-only.
-     * Identical to the configuration that previously showed 2 cycling columns —
-     * we MUST get this baseline back before re-introducing the framebuffer layer. */
-    __HAL_LTDC_LAYER_DISABLE(&hltdc, 0);
-    hltdc.Instance->SRCR  = LTDC_SRCR_IMR;
-    hltdc.Instance->BCCR  = 0x0000FF00U;   /* green */
+    /* Layer 0: L8 + CLUT, full screen, opaque. Configured here rather than in
+     * the CubeMX-generated MX_LTDC_Init so an .ioc regeneration can't stomp it
+     * (MX_LTDC_Init's placeholder layer config is simply overwritten). */
+    {
+        LTDC_LayerCfgTypeDef cfg = {0};
+        cfg.WindowX0 = 0; cfg.WindowX1 = NV3052C_WIDTH;
+        cfg.WindowY0 = 0; cfg.WindowY1 = NV3052C_HEIGHT;
+        cfg.PixelFormat = LTDC_PIXEL_FORMAT_L8;
+        cfg.Alpha = 255;
+        cfg.Alpha0 = 0;
+        cfg.BlendingFactor1 = LTDC_BLENDING_FACTOR1_CA;
+        cfg.BlendingFactor2 = LTDC_BLENDING_FACTOR2_CA;
+        cfg.FBStartAdress = (uint32_t)fb;
+        cfg.ImageWidth  = NV3052C_WIDTH;
+        cfg.ImageHeight = NV3052C_HEIGHT;
+        HAL_LTDC_ConfigCLUT(&hltdc, (uint32_t *)Gauge_CLUT, 256, 0);
+        HAL_LTDC_EnableCLUT(&hltdc, 0);
+        HAL_LTDC_ConfigLayer(&hltdc, &cfg, 0);
+    }
 }
 
-/* Cycle BCCR every 2 s — proves the LTDC→panel path is alive without any layer.
- * Green → red-appears-blue → blue-appears-red (panel BGR swap from MADCTL=0x0A). */
+/* Static image for now — real-time needle updates come with sensor data. */
 void NV3052C_Update(void)
 {
-    static uint32_t lastChange = 0;
-    static int      phase      = 0;
-    static const uint32_t bccr[] = { 0x0000FF00U, 0x00FF0000U, 0x000000FFU };
-
-    uint32_t now = HAL_GetTick();
-    if (now - lastChange < 2000U) return;
-    lastChange = now;
-    phase = (phase + 1) % 3;
-    hltdc.Instance->BCCR = bccr[phase];
 }

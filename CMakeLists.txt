@@ -46,6 +46,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Display/st77916.c
     Display/nv3052c.c
+    Display/gauge.c
     CAN/holley_can.c
     Sensors/sensors.c
     Inputs/inputs.c
