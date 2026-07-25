@@ -20,11 +20,13 @@ STM32H753ZI-based digital instrument cluster for a Ford F-100. Replaces the anal
 CubeIDE-CMake project. The `.ioc` file is the source of truth for peripheral config; pin assignments and HAL init code are regenerated from CubeMX.
 
 ```
-cmake --preset default
-cmake --build build/Release
+cmake --preset Release
+cmake --build --preset Release
 ```
 
 Flashing/debug is via the STM32 VS Code Extension (`.vscode/launch.json` is committed).
+
+> **Regeneration caution:** `DEPolarity = LTDC_DEPOLARITY_AL` in `MX_LTDC_Init` is a required fix (see NV3052C post-mortem) that lives in the CubeMX-generated region of `main.c` and is **not** captured in the `.ioc`. Set the LTDC DE polarity accordingly in CubeMX before regenerating, or the fix silently reverts and the center display goes dark.
 
 ## Project Layout
 
@@ -46,24 +48,16 @@ cmake/          Toolchain + STM32H7 cmake helpers
 ## Current Status
 
 - **ST77916 driver:** working — solid color test confirmed
-- **NV3052C driver:** debugging an unresolved issue (see below)
-- **CAN / ADC / pulse inputs:** peripherals configured, parsers not yet wired
+- **NV3052C driver:** working — half-screen issue resolved (see post-mortem below); currently runs a background-color cycling diagnostic, real gauge rendering not yet implemented
+- **CAN / ADC / pulse inputs:** implemented, not yet validated against real vehicle signals
 
-## NV3052C — current unresolved issue
+## NV3052C half-screen issue — resolved (2026-07-24)
 
-Reference materials (vendor datasheets + manufacturer's golden init sequence) are in [`_REMOVE-AFTER-NV3052C-WORKS/`](_REMOVE-AFTER-NV3052C-WORKS/) — that folder gets deleted once this issue is resolved.
+For a long stretch of this project the center display showed a perfect 50/50 vertical split: one half displayed the LTDC background color (washed out), the other a frozen "barcode" of vertical stripes. The split was invariant to PCLK frequency, porches, sync mode, and register `0x23`, moved only with MADCTL `ss`, and survived a Nucleo board swap. Root cause was two stacked firmware bugs:
 
-The NV3052CGRB center display is showing a **perfect 50/50 vertical split** when running a background-color-only test (LTDC `BCCR` cycling green→red→blue, layer disabled). One half displays the BCCR color cycling correctly (though somewhat washed-out); the other half shows a garbled "barcode" pattern.
+1. **SPI chip-select framing silently discarded the entire vendor init.** The bit-bang 9-bit SPI raised CS after every word, but the NV3052C page-select command (`0xFF`) takes its three parameters (`0x30`, `0x52`, page) in a *single* CS frame. The page never switched, so every page 1–3 write (source timing, gamma, VCOM) landed nowhere and the panel ran on power-on defaults — which load only ~360 of 720 columns per line. The half receiving each line's *late* pixels was never written (hence the frozen barcode of unlatched garbage, and why the dead side tracked `ss`), and the working half's colors were washed out by default gamma/VCOM. Fixed in [Display/nv3052c.c](Display/nv3052c.c): `nv_write()` holds CS low across a command and all its parameters; page selects are one three-parameter frame.
+2. **LTDC data-enable polarity was inverted.** Once the init actually applied, the panel obeyed strict DE-only mode (`0x23=0xA0`) and sampled during blanking — where the bus carries black — because `DEPolarity` was `AH`. Fixed to `AL` in `MX_LTDC_Init` (see the regeneration caution in Build).
 
-What we've tested:
-- SPI init sequence is byte-for-byte the manufacturer's golden init for this exact module (SF-TO400XC-8996A2-N from Saef Technology). Manufacturer init code is in `DataSheets/` reference.
-- Tested register `0x23` values (RGB interface control): 0x80 (SYNC+DE), 0xA0 (manufacturer's, DE-only), 0xA2 (alternate), 0x00.
-- Tested LTDC timing: HBP 44/120/200, HFP 46/120, PCLK 48 MHz / 38.4 MHz.
-- MADCTL `ss` bit flips which half is garbled — confirms the garbled side is whichever bank receives the *late* pixels in each scan line.
-- Datasheet confirms the IC has a 2160-channel source driver split into two physical banks: S1–S1080 + S1321–S2400 (gap is unused dummy outputs). The 720-pixel panel maps left half to bank A, right half to bank B.
+The decisive diagnostic: frame-by-frame analysis of phone video showed the garbled half was statistically frozen across background-color changes — those columns never latched *any* data, which eliminated signal-integrity and defective-panel theories (a constant input can't produce static multicolor stripes, and a dead bank wouldn't move with `ss`) and pointed at init delivery.
 
-The split is **invariant to PCLK frequency, HBP, HFP, and `0x23` value**. It moves only with MADCTL `ss`. Pattern persisted across two different Nucleo boards with identical wiring, which makes per-board hardware defect unlikely.
-
-Outstanding theory worth checking: the LTDC layer is currently configured with `ImageWidth=0, FBStartAdress=0, Alpha=0, BlendingFactor1=CA, BlendingFactor2=CA`. We then `__HAL_LTDC_LAYER_DISABLE` + `SRCR_IMR` to disable the layer. But the layer's shadow registers retain the bad config, and we don't know how the LTDC pipeline handles `pitch=0` with the layer technically enabled at any point. The asymmetric BlendingFactor pair (both CA) is also suspicious — if HAL's `LTDC_BLENDING_FACTOR2_CA` actually evaluates to `CA` (not `1-CA`), then with `Alpha=0` the blend math becomes `layer*0 + bg*0 = black`, which could explain BCCR appearing only on the half of the screen the layer "doesn't reach."
-
-Relevant files: [Display/nv3052c.c](Display/nv3052c.c), [Core/Src/main.c](Core/Src/main.c) (search `MX_LTDC_Init`, `pLayerCfg`), [Core/Src/stm32h7xx_hal_msp.c](Core/Src/stm32h7xx_hal_msp.c) (LTDC GPIO + PLL3 config).
+`0x23` and MADCTL are back at the manufacturer's golden values (`0xA0` / `0x0A`). Verified on hardware: full-screen saturated RGB cycling, uniform edge to edge, correct hues.

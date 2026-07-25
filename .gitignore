@@ -26,6 +26,9 @@ RemoteSystemsTempFiles/
 .vscode/*.log
 .vscode/ipch/
 
+# Local debugging media (photos/videos of the bench setup)
+reference/
+
 # OS junk
 .DS_Store
 Thumbs.db
