@@ -68,6 +68,10 @@ cmake/          Toolchain + STM32H7 cmake helpers
 - **CPU:** 400 MHz (PLL1, VOS1); draw-cost telemetry readable over SWD
   (`NV3052C_NeedleCycles`), screenshots via `tools/fbshot.py`
 - **CAN / ADC / pulse inputs:** implemented, not yet validated against real vehicle signals
+- **VSS -> needle (in progress, paused):** firmware complete and flashed — needle
+  tracks `Source_SpeedMph()`; a bench PWM test generator (PC9) stands in for the
+  transmission. Blocked on one non-conducting jumper wire; see
+  [`docs/vss-bringup-status.md`](docs/vss-bringup-status.md) for the exact pickup point.
 
 ## NV3052C half-screen issue — resolved (2026-07-24)
 
