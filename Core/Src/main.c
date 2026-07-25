@@ -134,6 +134,13 @@ int main(void)
     r.IsCacheable      = MPU_ACCESS_CACHEABLE;
     r.IsBufferable     = MPU_ACCESS_NOT_BUFFERABLE;
     HAL_MPU_ConfigRegion(&r);
+
+    /* Region 2: D2 SRAM1+SRAM2 (needle sprite ping-pong buffers), same
+     * write-through treatment for the same reason. */
+    r.Number      = MPU_REGION_NUMBER2;
+    r.BaseAddress = 0x30000000U;
+    r.Size        = MPU_REGION_SIZE_256KB;
+    HAL_MPU_ConfigRegion(&r);
     HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
   }
   /* CPU caches were never enabled; the Cortex-M7 is crippled without them and

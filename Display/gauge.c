@@ -213,3 +213,57 @@ void Gauge_RenderSpeedo(uint8_t *fb, int w, int h, float mph) {
     Gauge_RenderFace(fb, w, h);
     Gauge_SetNeedle(mph, 0, 0);
 }
+
+/* ---- needle sprite (AL44) for LTDC layer-2 compositing ---- */
+
+#define SPR_OPAQUE_RED ((uint8_t)(0xF0u | C_RED))
+
+/* thick segment into the sprite buffer, coordinates local to the sprite */
+static void sprite_seg(uint8_t *buf, int w, int h,
+                       float x0, float y0, float x1, float y1, float sw) {
+    float hw = sw * 0.5f;
+    int minx = (int)fminf(x0, x1) - (int)hw - 1, maxx = (int)fmaxf(x0, x1) + (int)hw + 1;
+    int miny = (int)fminf(y0, y1) - (int)hw - 1, maxy = (int)fmaxf(y0, y1) + (int)hw + 1;
+    if (minx < 0) minx = 0;
+    if (maxx >= w) maxx = w - 1;
+    if (miny < 0) miny = 0;
+    if (maxy >= h) maxy = h - 1;
+    float vx = x1 - x0, vy = y1 - y0, len2 = vx*vx + vy*vy;
+    for (int y = miny; y <= maxy; y++)
+        for (int x = minx; x <= maxx; x++) {
+            float t = len2 > 0 ? ((x - x0)*vx + (y - y0)*vy) / len2 : 0;
+            t = t < 0 ? 0 : (t > 1 ? 1 : t);
+            float dx = x - (x0 + t*vx), dy = y - (y0 + t*vy);
+            if (dx*dx + dy*dy <= hw*hw) buf[y * GAUGE_SPR_PITCH + x] = SPR_OPAQUE_RED;
+        }
+}
+
+void Gauge_DrawNeedleSprite(uint8_t *buf, float mph,
+                            int *out_x, int *out_y, int *out_w, int *out_h) {
+    float a = mph_angle(mph), ca = cosf(a), sa = sinf(a);
+
+    /* needle extents along its axis: tail reaches -50, tip +287 (widths incl.) */
+    float ex0 = -50.0f, ex1 = 287.0f;
+    int minx = (int)floorf(fminf(ex0*ca, ex1*ca)) - 7;
+    int maxx = (int)ceilf (fmaxf(ex0*ca, ex1*ca)) + 7;
+    int miny = (int)floorf(fminf(ex0*sa, ex1*sa)) - 7;
+    int maxy = (int)ceilf (fmaxf(ex0*sa, ex1*sa)) + 7;
+    int w = maxx - minx + 1, h = maxy - miny + 1;
+    if (w > GAUGE_SPR_MAX) w = GAUGE_SPR_MAX;
+    if (h > GAUGE_SPR_MAX) h = GAUGE_SPR_MAX;
+
+    /* clear exactly the region the LTDC window will scan */
+    for (int r = 0; r < h; r++)
+        for (int c = 0; c < w; c++) buf[r * GAUGE_SPR_PITCH + c] = 0;
+
+    /* segments in sprite-local coordinates */
+    float ox = (float)-minx, oy = (float)-miny;
+    sprite_seg(buf, w, h, ox - 46.0f*ca, oy - 46.0f*sa, ox - 36.0f*ca, oy - 36.0f*sa,  8.0f);
+    sprite_seg(buf, w, h, ox + 38.0f*ca, oy + 38.0f*sa, ox + 170.0f*ca, oy + 170.0f*sa, 10.0f);
+    sprite_seg(buf, w, h, ox + 170.0f*ca, oy + 170.0f*sa, ox + 282.0f*ca, oy + 282.0f*sa, 5.0f);
+
+    *out_x = W / 2 + minx;
+    *out_y = H / 2 + miny;
+    *out_w = w;
+    *out_h = h;
+}

@@ -17,4 +17,13 @@ void Gauge_RenderSpeedo(uint8_t *fb, int w, int h, float mph);
 void Gauge_RenderFace(uint8_t *fb, int w, int h);
 void Gauge_SetNeedle(float mph, uint32_t *dirty_first, uint32_t *dirty_last);
 
+/* Needle-as-sprite for hardware compositing on a second LTDC layer.
+ * Draws the needle in AL44 (high nibble alpha, low nibble CLUT index)
+ * into a GAUGE_SPR_PITCH-stride buffer, clearing exactly the bounding
+ * box it uses. Returns the sprite's screen position and size. */
+#define GAUGE_SPR_PITCH 352
+#define GAUGE_SPR_MAX   352
+void Gauge_DrawNeedleSprite(uint8_t *buf, float mph,
+                            int *x, int *y, int *w, int *h);
+
 #endif /* GAUGE_H */

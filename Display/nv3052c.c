@@ -12,6 +12,16 @@ extern LTDC_HandleTypeDef hltdc;
 #define FB_BYTES   (NV3052C_WIDTH * NV3052C_HEIGHT)
 static uint8_t * const fb = (uint8_t *)0x24000000U;
 
+/* Needle sprite ping-pong buffers (AL44, 352x352) in the otherwise unused
+ * D2 SRAM banks — one per bank. The back buffer is drawn off-screen, then
+ * LTDC layer 2's shadow registers flip to it atomically at vertical
+ * blanking, so the visible needle is never mid-update: tear-free by
+ * construction, independent of drawing speed. Both banks are covered by
+ * the write-through MPU region so no cache maintenance is needed. */
+static uint8_t * const spr[2] = { (uint8_t *)0x30000000U, (uint8_t *)0x30020000U };
+#define SPR_BYTES  (GAUGE_SPR_PITCH * GAUGE_SPR_MAX)
+static int spr_back;
+
 /* -------------------------------------------------------------------------
  * Bit-bang 9-bit SPI
  * PA7=MOSI, PG11=SCK, PG4=CS  (Mode 3: idle HIGH, latch on rising edge)
@@ -197,14 +207,18 @@ void NV3052C_Init(void)
     nv_reg(0x29, 0x00);   /* Display On */
     HAL_Delay(100);
 
-    /* Render the static gauge face, then hand the framebuffer to the LTDC.
+    /* Render the static gauge face (no needle — that lives on layer 2).
      * Guard the clean: cache maintenance by address with the D-cache disabled
      * raises an imprecise BusFault on the M7 (root cause of the 2026-07-25
      * black-screen HardFault). */
     Gauge_RenderFace(fb, NV3052C_WIDTH, NV3052C_HEIGHT);
-    Gauge_SetNeedle(0.0f, 0, 0);
     if (SCB->CCR & SCB_CCR_DC_Msk)
         SCB_CleanDCache_by_Addr((uint32_t *)fb, FB_BYTES);
+
+    /* Sprite RAM: D2 SRAM banks need their clocks; zero both buffers */
+    __HAL_RCC_D2SRAM1_CLK_ENABLE();
+    __HAL_RCC_D2SRAM2_CLK_ENABLE();
+    for (uint32_t i = 0; i < SPR_BYTES; i++) { spr[0][i] = 0; spr[1][i] = 0; }
 
     ltdc_clk_restore();
     __HAL_LTDC_ENABLE(&hltdc);
@@ -229,12 +243,37 @@ void NV3052C_Init(void)
         HAL_LTDC_EnableCLUT(&hltdc, 0);
         HAL_LTDC_ConfigLayer(&hltdc, &cfg, 0);
     }
+
+    /* Layer 1 (index 1): the needle sprite, AL44 with per-pixel alpha so
+     * everything outside the needle is transparent over the face. */
+    {
+        int x, y, w, h;
+        Gauge_DrawNeedleSprite(spr[0], 0.0f, &x, &y, &w, &h);
+        LTDC_LayerCfgTypeDef cfg = {0};
+        cfg.WindowX0 = (uint32_t)x; cfg.WindowX1 = (uint32_t)(x + w);
+        cfg.WindowY0 = (uint32_t)y; cfg.WindowY1 = (uint32_t)(y + h);
+        cfg.PixelFormat = LTDC_PIXEL_FORMAT_AL44;
+        cfg.Alpha = 255;
+        cfg.Alpha0 = 0;
+        cfg.BlendingFactor1 = LTDC_BLENDING_FACTOR1_PAxCA;
+        cfg.BlendingFactor2 = LTDC_BLENDING_FACTOR2_PAxCA;
+        cfg.FBStartAdress = (uint32_t)spr[0];
+        cfg.ImageWidth  = GAUGE_SPR_PITCH;
+        cfg.ImageHeight = (uint32_t)h;
+        HAL_LTDC_ConfigCLUT(&hltdc, (uint32_t *)Gauge_CLUT, 256, 1);
+        HAL_LTDC_EnableCLUT(&hltdc, 1);
+        HAL_LTDC_ConfigLayer(&hltdc, &cfg, 1);
+        spr_back = 1;
+    }
 }
 
 /* Animate the needle at ~50 FPS: an ignition sweep (0-120-0), then a
  * simulated cruise until real speed data is wired in. A low-pass filter
- * gives the needle damped, instrument-like motion. Only the dirty span
- * of the framebuffer is cache-cleaned each frame. */
+ * gives the needle damped, instrument-like motion. The needle is drawn
+ * into the OFF-SCREEN sprite buffer, then layer 2's shadow registers
+ * flip to it — the hardware applies position, size, and address as one
+ * atomic set at vertical blanking, so no partially drawn needle can
+ * ever reach the panel. */
 void NV3052C_Update(void)
 {
     static uint32_t lastFrame = 0;
@@ -243,15 +282,8 @@ void NV3052C_Update(void)
     uint32_t now = HAL_GetTick();
     if (now - lastFrame < 20U) return;
 
-    /* Anti-tearing: only mutate the framebuffer during vertical blanking.
-     * CPSR reports the scan position; past the accumulated active height
-     * there are front porch + sync + back porch (~71 lines, ~1.2 ms at
-     * this timing) before the panel reads again — far more than the
-     * needle update needs. If the scanline is mid-frame, punt to the
-     * next main-loop pass and check again. */
-    uint32_t aah = hltdc.Instance->AWCR & 0x7FFU;
-    uint32_t y   = hltdc.Instance->CPSR & 0xFFFFU;
-    if (y <= aah) return;
+    /* previous flip not yet latched by the hardware? try again next pass */
+    if (hltdc.Instance->SRCR & (LTDC_SRCR_VBR | LTDC_SRCR_IMR)) return;
 
     lastFrame = now;
 
@@ -268,9 +300,19 @@ void NV3052C_Update(void)
 
     shown += (target - shown) * 0.15f;      /* needle damping */
 
-    /* No cache clean here: the framebuffer region is write-through (MPU
-     * region 1), so these writes are already in RAM. With write-back this
-     * needed a span clean that could outlast the blanking window — the
-     * source of the residual tearing. */
-    Gauge_SetNeedle(shown, 0, 0);
+    /* draw into the back buffer (invisible), then queue the atomic flip */
+    int x, y, w, h;
+    Gauge_DrawNeedleSprite(spr[spr_back], shown, &x, &y, &w, &h);
+    __DSB();                                /* sprite writes drained to RAM */
+
+    uint32_t ahbp = (hltdc.Instance->BPCR >> 16) & 0xFFFU;
+    uint32_t avbp =  hltdc.Instance->BPCR & 0x7FFU;
+    LTDC_Layer2->WHPCR  = (((uint32_t)(x + w) + ahbp) << 16) | ((uint32_t)x + ahbp + 1U);
+    LTDC_Layer2->WVPCR  = (((uint32_t)(y + h) + avbp) << 16) | ((uint32_t)y + avbp + 1U);
+    LTDC_Layer2->CFBAR  = (uint32_t)spr[spr_back];
+    LTDC_Layer2->CFBLR  = ((uint32_t)GAUGE_SPR_PITCH << 16) | ((uint32_t)w + 7U);
+    LTDC_Layer2->CFBLNR = (uint32_t)h;
+    hltdc.Instance->SRCR = LTDC_SRCR_VBR;   /* latch all of it at next vblank */
+
+    spr_back ^= 1;
 }
