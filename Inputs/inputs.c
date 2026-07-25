@@ -66,6 +66,71 @@ static volatile uint16_t tachLastPeriodTicks = 0;
 static volatile uint32_t tachLastPulseMs     = 0;
 static volatile uint8_t  tachHaveFirstCap    = 0;
 
+/* -------------------------------------------------------------------------
+ * Bench VSS test signal — set to 0 (or cut the PC9 jumper) for the vehicle.
+ *
+ * Generates pulses on PC9 (TIM3_CH4, morpho CN12 pin 1). Jumper PC9 to the
+ * VSS input PA0 (Zio CN10 pin 29) and the needle shows speed measured by
+ * the REAL capture -> smoothing -> source-selection pipeline. The profile
+ * sweeps 0 -> 100 -> 0 MPH over 24 s so motion is obvious.
+ * -------------------------------------------------------------------------*/
+#define VSS_TEST_SIGNAL 1
+
+#if VSS_TEST_SIGNAL
+static TIM_HandleTypeDef htim3Test;
+#define TEST_TICK_HZ 10000U
+
+static void vss_test_signal_init(void)
+{
+    __HAL_RCC_TIM3_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+
+    GPIO_InitTypeDef g = {0};
+    g.Pin       = GPIO_PIN_9;                 /* PC9 = TIM3_CH4, AF2 */
+    g.Mode      = GPIO_MODE_AF_PP;
+    g.Pull      = GPIO_NOPULL;
+    g.Speed     = GPIO_SPEED_FREQ_LOW;
+    g.Alternate = GPIO_AF2_TIM3;
+    HAL_GPIO_Init(GPIOC, &g);
+
+    htim3Test.Instance               = TIM3;
+    htim3Test.Init.Prescaler         = (2U * HAL_RCC_GetPCLK1Freq()) / TEST_TICK_HZ - 1U;
+    htim3Test.Init.CounterMode       = TIM_COUNTERMODE_UP;
+    htim3Test.Init.Period            = TEST_TICK_HZ / 10U;    /* placeholder until first update */
+    htim3Test.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
+    htim3Test.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    HAL_TIM_PWM_Init(&htim3Test);
+
+    TIM_OC_InitTypeDef oc = {0};
+    oc.OCMode     = TIM_OCMODE_PWM1;
+    oc.Pulse      = htim3Test.Init.Period / 2U;
+    oc.OCPolarity = TIM_OCPOLARITY_HIGH;
+    HAL_TIM_PWM_ConfigChannel(&htim3Test, &oc, TIM_CHANNEL_4);
+    HAL_TIM_PWM_Start(&htim3Test, TIM_CHANNEL_4);
+}
+
+static void vss_test_signal_update(uint32_t nowMs)
+{
+    static uint32_t lastMs = 0;
+    if (nowMs - lastMs < 100U) return;        /* retune 10x per second */
+    lastMs = nowMs;
+
+    float phase = (float)(nowMs % 24000U) / 1000.0f;      /* 0..24 s   */
+    float mph   = (phase < 12.0f ? phase : 24.0f - phase) * (100.0f / 12.0f);
+    float hz    = mph * (float)calibration.vssPulsesPerMile / 3600.0f;
+
+    if (hz < 1.0f) {                          /* "stopped": no pulses  */
+        __HAL_TIM_SET_COMPARE(&htim3Test, TIM_CHANNEL_4, 0);
+        return;
+    }
+    uint32_t arr = (uint32_t)((float)TEST_TICK_HZ / hz);
+    if (arr < 2U) arr = 2U;
+    if (arr > 65535U) arr = 65535U;
+    __HAL_TIM_SET_AUTORELOAD(&htim3Test, arr - 1U);
+    __HAL_TIM_SET_COMPARE(&htim3Test, TIM_CHANNEL_4, arr / 2U);
+}
+#endif /* VSS_TEST_SIGNAL */
+
 void Inputs_Init(void)
 {
     /* TIM2 (VSS) — interrupt-driven input capture. */
@@ -76,6 +141,10 @@ void Inputs_Init(void)
      * clock so the 16-bit counter always covers cranking-RPM periods.
      * CubeMX still generates Prescaler=0; this overrides it. */
     __HAL_TIM_SET_PRESCALER(&htim1, (2U * HAL_RCC_GetPCLK2Freq()) / TACH_TIM_CLK_HZ - 1U);
+
+#if VSS_TEST_SIGNAL
+    vss_test_signal_init();
+#endif
     HAL_TIM_IC_Start_IT(&htim1, TIM_CHANNEL_1);
 
     /* CubeMX didn't enable NVIC for either timer (input-capture-only timers
@@ -91,6 +160,10 @@ void Inputs_Init(void)
 void Inputs_Update(void)
 {
     uint32_t now = HAL_GetTick();
+
+#if VSS_TEST_SIGNAL
+    vss_test_signal_update(now);
+#endif
 
     /* --- VSS: average of last N pulse periods → MPH ------------------- */
     {

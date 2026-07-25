@@ -59,16 +59,16 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define BATT_VOLTAGE_IN_Pin GPIO_PIN_1
 #define BATT_VOLTAGE_IN_GPIO_Port GPIOC
-#define TACH_INPUT_Pin GPIO_PIN_0
-#define TACH_INPUT_GPIO_Port GPIOA
+#define VSS_INPUT_Pin GPIO_PIN_0
+#define VSS_INPUT_GPIO_Port GPIOA
 #define OIL_PRESSURE_IN_Pin GPIO_PIN_1
 #define OIL_PRESSURE_IN_GPIO_Port GPIOA
 #define COOLANT_TEMP_IN_Pin GPIO_PIN_2
 #define COOLANT_TEMP_IN_GPIO_Port GPIOA
 #define DIMMER_IN_Pin GPIO_PIN_12
 #define DIMMER_IN_GPIO_Port GPIOF
-#define VSS_INPUT_Pin GPIO_PIN_9
-#define VSS_INPUT_GPIO_Port GPIOE
+#define TACH_INPUT_Pin GPIO_PIN_9
+#define TACH_INPUT_GPIO_Port GPIOE
 #define TURN_LEFT_IN_Pin GPIO_PIN_12
 #define TURN_LEFT_IN_GPIO_Port GPIOB
 #define TURN_RIGHT_IN_Pin GPIO_PIN_13

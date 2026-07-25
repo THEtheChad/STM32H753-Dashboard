@@ -1,5 +1,6 @@
 #include "nv3052c.h"
 #include "gauge.h"
+#include "sources.h"
 #include <math.h>
 
 extern LTDC_HandleTypeDef hltdc;
@@ -299,9 +300,9 @@ void NV3052C_Update(void)
     if (now < 3000U) {                      /* ignition sweep, up then back */
         float t = (float)now / 1500.0f;     /* 0..2 */
         target = (t < 1.0f ? t : 2.0f - t) * 100.0f;
-    } else {                                /* cruise: two layered sines */
-        float t = (float)now / 1000.0f;
-        target = 55.0f + 22.0f * sinf(t * 0.6f) + 9.0f * sinf(t * 1.7f + 1.3f);
+    } else {                                /* live: VSS pulses or Holley CAN
+                                               via the source-selection policy */
+        target = Source_SpeedMph();
     }
     if (target < 0.0f)   target = 0.0f;
     if (target > 100.0f) target = 100.0f;
